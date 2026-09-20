@@ -3,15 +3,9 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	"log/slog"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
 
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
-	"github.com/ilyakaznacheev/cleanenv"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
@@ -20,78 +14,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
-
-// Config holds configuration options for OpenTelemetry.
-type Config struct {
-	ServiceName      string  `env:"OTEL_SERVICE_NAME" yaml:"service_name" json:"service_name"`
-	ServiceVersion   string  `env:"OTEL_SERVICE_VERSION" yaml:"service_version" json:"service_version"`
-	OTLPEndpoint     string  `env:"OTEL_EXPORTER_OTLP_ENDPOINT" yaml:"otlp_endpoint" json:"otlp_endpoint"`
-	Insecure         bool    `env:"OTEL_EXPORTER_OTLP_INSECURE" yaml:"insecure" json:"insecure"`
-	ExporterType     string  `env:"OTEL_TRACES_EXPORTER" yaml:"exporter_type" json:"exporter_type"`
-	SamplePercentage float64 `env:"OTEL_SAMPLE_PERCENTAGE" yaml:"sample_percentage" json:"sample_percentage"`
-}
-
-// LoadConfigFromEnv builds a Config from environment variables and optional configuration files (YAML, JSON, TOML).
-// If configPath is provided or OTEL_CONFIG_FILE / CONFIG_FILE is set, the file is read and then overridden by environment variables.
-func LoadConfigFromEnv(configPath ...string) Config {
-	cfg := Config{
-		ServiceName:      "pets-service",
-		ServiceVersion:   "1.0.0",
-		Insecure:         true,
-		SamplePercentage: 100.0,
-	}
-
-	// Sanitize environment variables for cleanenv
-	if val, ok := os.LookupEnv("OTEL_SAMPLE_PERCENTAGE"); ok {
-		if before, ok0 := strings.CutSuffix(val, "%"); ok0 {
-			_ = os.Setenv("OTEL_SAMPLE_PERCENTAGE", before)
-		}
-	} else if val := os.Getenv("OTEL_TRACES_SAMPLER_ARG"); val != "" {
-		if parsed, err := strconv.ParseFloat(strings.TrimSpace(val), 64); err == nil {
-			if parsed <= 1.0 && parsed > 0 {
-				parsed = parsed * 100.0
-			}
-			_ = os.Setenv("OTEL_SAMPLE_PERCENTAGE", strconv.FormatFloat(parsed, 'f', -1, 64))
-			defer func() { _ = os.Unsetenv("OTEL_SAMPLE_PERCENTAGE") }()
-		}
-	}
-
-	targetPath := ""
-	if len(configPath) > 0 && configPath[0] != "" {
-		targetPath = configPath[0]
-	} else if envPath := os.Getenv("OTEL_CONFIG_FILE"); envPath != "" {
-		targetPath = envPath
-	} else if envPath := os.Getenv("CONFIG_FILE"); envPath != "" {
-		targetPath = envPath
-	}
-
-	if targetPath != "" {
-		targetPath = filepath.Clean(targetPath)
-		if _, err := os.Stat(targetPath); err == nil { //nolint:gosec // targetPath is from CLI flag or env var
-			if err := cleanenv.ReadConfig(targetPath, &cfg); err != nil {
-				slog.Warn("Failed to read telemetry config file, falling back to environment variables",
-					"path", targetPath,
-					"error", err,
-				)
-				_ = cleanenv.ReadEnv(&cfg)
-			}
-		} else {
-			_ = cleanenv.ReadEnv(&cfg)
-		}
-	} else {
-		_ = cleanenv.ReadEnv(&cfg)
-	}
-
-	if cfg.ExporterType == "" {
-		if cfg.OTLPEndpoint != "" {
-			cfg.ExporterType = "otlp"
-		} else {
-			cfg.ExporterType = "none"
-		}
-	}
-
-	return cfg
-}
 
 // Init initializes the OpenTelemetry TracerProvider and global propagators.
 // It returns a shutdown function that flushes and cleans up the TracerProvider.
@@ -103,14 +25,9 @@ func Init(ctx context.Context, cfg Config) (func(context.Context) error, error) 
 		propagation.Baggage{},
 	))
 
-	res, err := resource.New(ctx,
-		resource.WithAttributes(
-			semconv.ServiceNameKey.String(cfg.ServiceName),
-			semconv.ServiceVersionKey.String(cfg.ServiceVersion),
-		),
-	)
+	res, err := NewResource(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create otel resource: %w", err)
+		return nil, err
 	}
 
 	var opts []sdktrace.TracerProviderOption
@@ -167,4 +84,19 @@ func NewConnectInterceptor() (connect.Interceptor, error) {
 		otelconnect.WithTrustRemote(),
 		otelconnect.WithPropagateResponseHeader(),
 	)
+}
+
+// NewResource describes this service to the telemetry pipeline. Traces and metrics
+// share it so a span and a metric series can be attributed to the same deployment.
+func NewResource(ctx context.Context, cfg Config) (*resource.Resource, error) {
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceNameKey.String(cfg.ServiceName),
+			semconv.ServiceVersionKey.String(cfg.ServiceVersion),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating otel resource: %w", err)
+	}
+	return res, nil
 }

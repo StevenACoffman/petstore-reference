@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,21 +16,39 @@ import (
 	"github.com/example/pets/internal/db"
 )
 
-func init() {
-	// Automatically detect and configure Colima socket on macOS if DOCKER_HOST is not set
-	if os.Getenv("DOCKER_HOST") == "" {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			colimaSock := filepath.Join(home, ".colima", "default", "docker.sock")
-			if _, err := os.Stat(colimaSock); err == nil {
-				_ = os.Setenv("DOCKER_HOST", "unix://"+colimaSock)
-				if os.Getenv("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE") == "" {
-					_ = os.Setenv("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
-				}
-			}
+// configureDockerHost points testcontainers at a Colima socket on macOS when the
+// caller has not already chosen a Docker endpoint.
+//
+// This runs from StartTestDB rather than from init() for two reasons: init() runs
+// unconditionally in every binary that links this package, and its effect on the
+// process environment cannot be suppressed or reset by a test. sync.Once keeps the
+// environment writes to a single goroutine even when suites start concurrently.
+//
+// Requires: nothing.
+// Ensures:  DOCKER_HOST and TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE are left untouched
+//
+//	when already set, or when no Colima socket is present.
+func configureDockerHost() {
+	dockerHostOnce.Do(func() {
+		if os.Getenv("DOCKER_HOST") != "" {
+			return
 		}
-	}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return
+		}
+		colimaSock := filepath.Join(home, ".colima", "default", "docker.sock")
+		if _, err := os.Stat(colimaSock); err != nil {
+			return
+		}
+		_ = os.Setenv("DOCKER_HOST", "unix://"+colimaSock)
+		if os.Getenv("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE") == "" {
+			_ = os.Setenv("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
+		}
+	})
 }
+
+var dockerHostOnce sync.Once
 
 // TestDB wraps a PostgreSQL connection pool and optional Testcontainer instance.
 type TestDB struct {
@@ -40,6 +59,8 @@ type TestDB struct {
 // StartTestDB spins up a PostgreSQL testcontainer (or connects to DATABASE_URL if set),
 // applies all migrations, and returns the TestDB instance.
 func StartTestDB(ctx context.Context) (*TestDB, error) {
+	configureDockerHost()
+
 	dbURL := os.Getenv("DATABASE_URL")
 	var pgContainer *pgmodule.PostgresContainer
 

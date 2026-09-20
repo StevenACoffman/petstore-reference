@@ -2,305 +2,224 @@ package pet
 
 import (
 	"context"
-	"errors"
-	"math"
-	"strings"
-	"time"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	petv1 "github.com/example/pets/gen/go/pet/v1"
 	"github.com/example/pets/gen/go/pet/v1/petv1connect"
 	"github.com/example/pets/internal/auth"
 	"github.com/example/pets/internal/db"
+	"github.com/example/pets/internal/resilience"
 )
 
+// This file is the imperative shell: it opens transactions, runs queries, and turns
+// their results into responses. Every decision it makes — what is valid, what a value
+// means, how a row becomes a message — is delegated to the pure core in core.go.
+
+// Handler serves the PetService RPCs.
 type Handler struct {
-	pool    *pgxpool.Pool
 	queries *db.Queries
+	// resilientDB applies retry and circuit-breaker policies to read operations. It
+	// may be nil, in which case reads run unprotected.
+	resilientDB *resilience.DB
 }
 
 var _ petv1connect.PetServiceHandler = (*Handler)(nil)
 
+// NewHandler builds a Handler over the given pool.
+//
+// A nil pool is permitted so that routing and middleware can be exercised without a
+// database; every RPC will then fail with an internal error rather than panic.
 func NewHandler(pool *pgxpool.Pool) *Handler {
-	return &Handler{
-		pool:    pool,
-		queries: db.New(pool),
-	}
+	return &Handler{queries: db.New(pool)}
 }
 
-// New is a convenience alias for NewHandler.
-func New(pool *pgxpool.Pool) *Handler {
-	return NewHandler(pool)
+// WithResilience returns a copy of h whose read paths run under the given policies.
+//
+// Only reads are wrapped. A retry replays the operation, which is safe for a query
+// and unsafe for a write that may already have committed — the write paths here are
+// transactional and non-idempotent, so they deliberately stay outside the retry
+// policy. They still surface a broken database through the breaker, because the
+// reads they are interleaved with trip it.
+func (h *Handler) WithResilience(policies *resilience.DB) *Handler {
+	clone := *h
+	clone.resilientDB = policies
+	return &clone
 }
 
-func parseDate(dateStr string) (pgtype.Date, error) {
-	trimmed := strings.TrimSpace(dateStr)
-	if trimmed == "" {
-		return pgtype.Date{Valid: false}, nil
-	}
-	t, err := time.Parse("2006-01-02", trimmed)
-	if err != nil {
-		return pgtype.Date{}, errors.New("invalid birth_date format, expected YYYY-MM-DD")
-	}
-	return pgtype.Date{Time: t, Valid: true}, nil
+// read runs a read-only query under the handler's resilience policies.
+func read[T any](ctx context.Context, h *Handler, op func(context.Context) (T, error)) (T, error) {
+	return resilience.Get(ctx, h.resilientDB, op)
 }
 
-func (h *Handler) CreatePet(ctx context.Context, req *connect.Request[petv1.CreatePetRequest]) (*connect.Response[petv1.CreatePetResponse], error) {
-	msg := req.Msg
-
-	name := strings.TrimSpace(msg.Name)
-	species := strings.TrimSpace(msg.Species)
-	if name == "" || species == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name and species cannot be blank"))
-	}
-
-	tags := msg.Tags
-	if tags == nil {
-		tags = []string{}
-	}
-
-	photoUrls := msg.PhotoUrls
-	if photoUrls == nil {
-		photoUrls = []string{}
-	}
-
-	callerEmail, ok := auth.UserEmailFromContext(ctx)
+// callerEmail reads the authenticated identity that audit columns record.
+func callerEmail(ctx context.Context) (string, error) {
+	email, ok := auth.UserEmailFromContext(ctx)
 	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authenticated identity has no email"))
+		return "", connect.NewError(connect.CodeUnauthenticated, errUnauthClaims)
 	}
+	return email, nil
+}
 
-	birthDate, err := parseDate(msg.BirthDate)
+func (h *Handler) CreatePet(
+	ctx context.Context, req *connect.Request[petv1.CreatePetRequest],
+) (*connect.Response[petv1.CreatePetResponse], error) {
+	const op = "Handler.CreatePet"
+
+	input, err := newPetInput(req.Msg)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, translate(ctx, op, err)
 	}
-
-	status := msg.Status
-	if status == petv1.PetStatus_PET_STATUS_UNSPECIFIED {
-		status = petv1.PetStatus_PET_STATUS_AVAILABLE
+	email, err := callerEmail(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	created, err := h.queries.CreatePet(ctx, db.CreatePetParams{
-		Name:               name,
-		Species:            species,
-		BirthDate:          birthDate,
-		BirthDateEstimated: msg.BirthDateEstimated,
-		Status:             status.String(),
-		PhotoUrls:          photoUrls,
-		Tags:               tags,
-		CreatedBy:          callerEmail,
-		ModifiedBy:         callerEmail,
+		Name:               input.Name,
+		Species:            input.Species,
+		BirthDate:          input.BirthDate,
+		BirthDateEstimated: input.BirthDateEstimated,
+		Status:             input.Status,
+		PhotoUrls:          input.PhotoUrls,
+		Tags:               input.Tags,
+		CreatedBy:          email,
+		ModifiedBy:         email,
 	})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, translate(ctx, op, err)
 	}
 
-	return connect.NewResponse(&petv1.CreatePetResponse{
-		Pet: toProtoPet(created),
-	}), nil
+	return connect.NewResponse(&petv1.CreatePetResponse{Pet: toProtoPet(created)}), nil
 }
 
-func (h *Handler) GetPet(ctx context.Context, req *connect.Request[petv1.GetPetRequest]) (*connect.Response[petv1.GetPetResponse], error) {
-	var uid pgtype.UUID
-	if err := uid.Scan(req.Msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid pet UUID"))
-	}
+func (h *Handler) GetPet(
+	ctx context.Context, req *connect.Request[petv1.GetPetRequest],
+) (*connect.Response[petv1.GetPetResponse], error) {
+	const op = "Handler.GetPet"
 
-	item, err := h.queries.GetPet(ctx, uid)
+	uid, err := parseUUID("id", req.Msg.GetId())
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, connect.NewError(connect.CodeNotFound, errors.New("pet not found"))
-		}
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, translate(ctx, op, err)
 	}
 
-	return connect.NewResponse(&petv1.GetPetResponse{
-		Pet: toProtoPet(item),
-	}), nil
+	item, err := read(ctx, h, func(c context.Context) (db.Pet, error) {
+		return h.queries.GetPet(c, uid)
+	})
+	if err != nil {
+		return nil, translate(ctx, op, err)
+	}
+	return connect.NewResponse(&petv1.GetPetResponse{Pet: toProtoPet(item)}), nil
 }
 
-func (h *Handler) ListPets(ctx context.Context, req *connect.Request[petv1.ListPetsRequest]) (*connect.Response[petv1.ListPetsResponse], error) {
+func (h *Handler) ListPets(
+	ctx context.Context, req *connect.Request[petv1.ListPetsRequest],
+) (*connect.Response[petv1.ListPetsResponse], error) {
+	const op = "Handler.ListPets"
 	msg := req.Msg
 
-	limit := int32(20)
-	if msg.PageSize > 0 {
-		limit = msg.PageSize
-	}
-	offset := int64(0)
-	if msg.Page > 0 {
-		offset = int64(msg.Page) * int64(limit)
-		if offset > math.MaxInt32 {
-			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("page offset is too large"))
-		}
+	limit, offset, err := pageBounds(msg.GetPage(), msg.GetPageSize())
+	if err != nil {
+		return nil, translate(ctx, op, err)
 	}
 
 	var statusParam pgtype.Text
-	if msg.Status != petv1.PetStatus_PET_STATUS_UNSPECIFIED {
-		statusParam = pgtype.Text{String: msg.Status.String(), Valid: true}
+	if msg.GetStatus() != petv1.PetStatus_PET_STATUS_UNSPECIFIED {
+		statusParam = pgtype.Text{String: msg.GetStatus().String(), Valid: true}
 	}
-
 	var speciesParam pgtype.Text
-	if msg.Species != "" {
-		speciesParam = pgtype.Text{String: msg.Species, Valid: true}
+	if msg.GetSpecies() != "" {
+		speciesParam = pgtype.Text{String: msg.GetSpecies(), Valid: true}
 	}
 
-	pets, err := h.queries.ListPets(ctx, db.ListPetsParams{
-		Limit:   limit,
-		Offset:  int32(offset),
-		Status:  statusParam,
-		Species: speciesParam,
+	pets, err := read(ctx, h, func(c context.Context) ([]db.Pet, error) {
+		return h.queries.ListPets(c, db.ListPetsParams{
+			Limit:   limit,
+			Offset:  offset,
+			Status:  statusParam,
+			Species: speciesParam,
+		})
 	})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, translate(ctx, op, err)
 	}
 
-	totalCount, err := h.queries.CountPets(ctx, db.CountPetsParams{
-		Status:  statusParam,
-		Species: speciesParam,
+	totalCount, err := read(ctx, h, func(c context.Context) (int64, error) {
+		return h.queries.CountPets(c, db.CountPetsParams{
+			Status:  statusParam,
+			Species: speciesParam,
+		})
 	})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, translate(ctx, op, err)
 	}
 
 	protoPets := make([]*petv1.Pet, len(pets))
-	for i, p := range pets {
-		protoPets[i] = toProtoPet(p)
-	}
-
-	var totalCount32 int32
-	if totalCount > math.MaxInt32 {
-		totalCount32 = math.MaxInt32
-	} else if totalCount < math.MinInt32 {
-		totalCount32 = math.MinInt32
-	} else {
-		totalCount32 = int32(totalCount)
+	for i := range pets {
+		protoPets[i] = toProtoPet(pets[i])
 	}
 
 	return connect.NewResponse(&petv1.ListPetsResponse{
 		Pets:       protoPets,
-		TotalCount: totalCount32,
+		TotalCount: clampToInt32(totalCount),
 	}), nil
 }
 
-func (h *Handler) UpdatePet(ctx context.Context, req *connect.Request[petv1.UpdatePetRequest]) (*connect.Response[petv1.UpdatePetResponse], error) {
-	msg := req.Msg
+func (h *Handler) UpdatePet(
+	ctx context.Context, req *connect.Request[petv1.UpdatePetRequest],
+) (*connect.Response[petv1.UpdatePetResponse], error) {
+	const op = "Handler.UpdatePet"
 
-	var uid pgtype.UUID
-	if err := uid.Scan(msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid pet UUID"))
-	}
-
-	name := strings.TrimSpace(msg.Name)
-	species := strings.TrimSpace(msg.Species)
-	if name == "" || species == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name and species cannot be blank"))
-	}
-
-	tags := msg.Tags
-	if tags == nil {
-		tags = []string{}
-	}
-
-	photoUrls := msg.PhotoUrls
-	if photoUrls == nil {
-		photoUrls = []string{}
-	}
-
-	callerEmail, ok := auth.UserEmailFromContext(ctx)
-	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authenticated identity has no email"))
-	}
-
-	birthDate, err := parseDate(msg.BirthDate)
+	uid, err := parseUUID("id", req.Msg.GetId())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, translate(ctx, op, err)
 	}
-
-	status := msg.Status
-	if status == petv1.PetStatus_PET_STATUS_UNSPECIFIED {
-		status = petv1.PetStatus_PET_STATUS_AVAILABLE
+	input, err := newPetInput(req.Msg)
+	if err != nil {
+		return nil, translate(ctx, op, err)
+	}
+	email, err := callerEmail(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	updated, err := h.queries.UpdatePet(ctx, db.UpdatePetParams{
 		ID:                 uid,
-		Name:               name,
-		Species:            species,
-		BirthDate:          birthDate,
-		BirthDateEstimated: msg.BirthDateEstimated,
-		Status:             status.String(),
-		PhotoUrls:          photoUrls,
-		Tags:               tags,
-		ModifiedBy:         callerEmail,
+		Name:               input.Name,
+		Species:            input.Species,
+		BirthDate:          input.BirthDate,
+		BirthDateEstimated: input.BirthDateEstimated,
+		Status:             input.Status,
+		PhotoUrls:          input.PhotoUrls,
+		Tags:               input.Tags,
+		ModifiedBy:         email,
 	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, connect.NewError(connect.CodeNotFound, errors.New("pet not found"))
-		}
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, translate(ctx, op, err)
 	}
 
-	return connect.NewResponse(&petv1.UpdatePetResponse{
-		Pet: toProtoPet(updated),
-	}), nil
+	return connect.NewResponse(&petv1.UpdatePetResponse{Pet: toProtoPet(updated)}), nil
 }
 
-func (h *Handler) DeletePet(ctx context.Context, req *connect.Request[petv1.DeletePetRequest]) (*connect.Response[petv1.DeletePetResponse], error) {
-	var uid pgtype.UUID
-	if err := uid.Scan(req.Msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid pet UUID"))
+func (h *Handler) DeletePet(
+	ctx context.Context, req *connect.Request[petv1.DeletePetRequest],
+) (*connect.Response[petv1.DeletePetResponse], error) {
+	const op = "Handler.DeletePet"
+
+	uid, err := parseUUID("id", req.Msg.GetId())
+	if err != nil {
+		return nil, translate(ctx, op, err)
 	}
 
 	rowsAffected, err := h.queries.DeletePet(ctx, uid)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, translate(ctx, op, err)
 	}
 	if rowsAffected == 0 {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("pet not found"))
+		return nil, connect.NewError(connect.CodeNotFound, errNotFound)
 	}
 
-	return connect.NewResponse(&petv1.DeletePetResponse{
-		Success: true,
-	}), nil
-}
-
-func toProtoPet(p db.Pet) *petv1.Pet {
-	statusStr := p.Status
-	if !strings.HasPrefix(statusStr, "PET_STATUS_") {
-		statusStr = "PET_STATUS_" + statusStr
-	}
-	statusVal := petv1.PetStatus_value[statusStr]
-
-	petID := uuid.UUID(p.ID.Bytes).String()
-
-	var birthDateStr string
-	if p.BirthDate.Valid {
-		birthDateStr = p.BirthDate.Time.Format("2006-01-02")
-	}
-
-	protoPet := &petv1.Pet{
-		Id:                 petID,
-		Name:               p.Name,
-		Species:            p.Species,
-		BirthDate:          birthDateStr,
-		BirthDateEstimated: p.BirthDateEstimated,
-		Status:             petv1.PetStatus(statusVal),
-		PhotoUrls:          p.PhotoUrls,
-		Tags:               p.Tags,
-		CreatedBy:          p.CreatedBy,
-		ModifiedBy:         p.ModifiedBy,
-	}
-
-	if p.CreatedAt.Valid {
-		protoPet.CreatedAt = timestamppb.New(p.CreatedAt.Time)
-	}
-	if p.ModifiedAt.Valid {
-		protoPet.ModifiedAt = timestamppb.New(p.ModifiedAt.Time)
-	}
-
-	return protoPet
+	return connect.NewResponse(&petv1.DeletePetResponse{Success: true}), nil
 }

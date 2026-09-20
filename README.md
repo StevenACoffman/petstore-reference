@@ -23,7 +23,7 @@ This was put together [by request](https://github.com/sudorandom/kmcd.dev/issues
 | **Local Database** | Docker Compose | Local PostgreSQL container with automated schema migrations via Goose |
 | **Linter & Security** | [golangci-lint](https://golangci-lint.run) + [gosec](https://github.com/securego/gosec) | Static analysis and security vulnerability scanner |
 | **Vulnerability Scanner** | [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) | Official Go vulnerability scanner for known CVEs |
-| **Frontend** | [React](https://react.dev) + [Vite](https://vite.dev) + [TanStack Query](https://tanstack.com/query) | Responsive SPA with Connect-Web, black/white dark mode toggle, and photo uploads |
+| **Frontend** | [React](https://react.dev) + [Vite](https://vite.dev) + [TanStack Query](https://tanstack.com/query) | Responsive SPA with Connect-Web, black/white dark mode toggle, and photo URLs |
 
 ---
 
@@ -44,7 +44,7 @@ This was put together [by request](https://github.com/sudorandom/kmcd.dev/issues
 │   ├── auth/               # ConnectRPC Bearer Token authentication interceptor & context claims
 │   ├── config/             # Environment variable configuration
 │   ├── db/                 # SQLC generated database code & pgxpool with otelpgx
-│   ├── pet/                # PetServiceHandler implementation & photo streaming handler
+│   ├── pet/                # PetService: pure core (core.go) + I/O shell (handler.go)
 │   ├── telemetry/          # OpenTelemetry TracerProvider & Connect interceptor setup
 │   └── testutil/           # PostgreSQL Testcontainers helper with Goose migrations & TRUNCATE
 ├── proto/
@@ -52,7 +52,7 @@ This was put together [by request](https://github.com/sudorandom/kmcd.dev/issues
 ├── gen/                    # Generated Go stubs, OpenAPI specs, and binary descriptor images
 ├── sql/
 │   ├── schema/             # Versioned Goose migrations
-│   └── queries/            # SQLC queries for pets and photos
+│   └── queries/            # SQLC queries for pets
 ├── stubs/
 │   ├── normal/             # FauxRPC stubs with CEL dynamic responses
 │   └── failures/           # FauxRPC failure stubs for error testing
@@ -88,24 +88,46 @@ just up
 
 ### 4. Code Quality, Security & Tests
 ```bash
-# Run linter with gosec
+# Run golangci-lint over both build configurations (default and integration)
 just lint
+
+# Apply every fix the linters can make automatically
+just lint-fix
 
 # Run Go vulnerability check
 just vulncheck
 
-# Run internal tests (unit tests + database integration tests via Testcontainers)
+# Fast unit suite: race detector on, no Docker required (~5s)
 just test
 
-# Run end-to-end integration tests (ConnectRPC HTTP server + Testcontainers)
+# The same suite with a coverage summary
+just test-cover
+
+# Container-backed suites (needs a running Docker/Colima daemon)
 just test-integration
+
+# Fuzz the pure core; a short burst per target
+just fuzz-all 20s
+# ...or one target for longer
+just fuzz FuzzNewPetInput 60s
+
+# Verify go.mod/go.sum are tidy
+just tidy-check
 
 # Run frontend tests (Vitest + ephemeral FauxRPC mock server)
 just test-web
 
-# Run all quality & security checks at once (lint, vulncheck, test, test-web)
+# Every gate CI runs
 just check
+
+# Install the git hooks (pre-commit, pre-push, commit-msg)
+just hooks
 ```
+
+The same gates run on every push and pull request via
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml): lint, tidy, generated-code
+freshness, `buf lint` plus breaking-change detection, unit tests, integration tests,
+a fuzz smoke run, `govulncheck`, and the frontend build and tests.
 
 ### 5. Run the Go Microservice
 ```bash
@@ -114,8 +136,21 @@ just run
 The service will be listening on `https://localhost:8080` (TLS enabled via `mkcert`).
 - **Interactive OpenAPI Documentation:** `https://localhost:8080/docs`
 - **OpenAPI 3.1 Spec (YAML):** `https://localhost:8080/openapi.yaml`
-- **Health Check:** `https://localhost:8080/healthz`
+- **Liveness:** `https://localhost:8080/healthz` — the process is up. Touches no
+  dependency, so a database blip never gets a healthy pod killed.
+- **Readiness:** `https://localhost:8080/readyz` — the service can serve traffic,
+  which means PostgreSQL is reachable. This is the one a load balancer should poll.
 - **Connect Service:** `https://localhost:8080/pet.v1.PetService/`
+
+Operational endpoints are served on a **separate admin listener**, bound to loopback
+(`127.0.0.1:9090`) by default, so profiling data is never exposed publicly:
+- **Prometheus metrics:** `http://127.0.0.1:9090/metrics` — RED metrics
+  (rate, errors, duration as a histogram, so p50/p95/p99 are queryable) for every RPC
+  plus Go runtime saturation signals.
+- **pprof:** `http://127.0.0.1:9090/debug/pprof/` — CPU, heap, goroutine, mutex.
+- **Execution trace snapshot:** `POST http://127.0.0.1:9090/debug/trace/snapshot`
+  writes the flight recorder's rolling buffer to a file for `go tool trace`. Enable it
+  by setting `TRACE_SNAPSHOT_DIR`.
 
 ### 6. Run the Web Frontend
 ```bash
@@ -171,10 +206,84 @@ pnpm test
 Tests that touch the database run against real PostgreSQL (`postgres:17-alpine`) using **[Testcontainers for Go](https://golang.testcontainers.org)** instead of mocks or SQLite. This even includes top-level handler code, which makes those tests very powerful because they will interact with all layers beneath it without any mocking code. Very often, unit tests end up testing mock assertions more than your actual code if you leverage interfaces and mocking too often.
 
 - **Automated migrations**: Containers start with the full suite of Goose migrations applied via [`db.Migrate`](internal/db/migrate.go).
-- **Fast isolation via `TRUNCATE`**: To keep test suites fast (<3s), suites reuse the container and run `TRUNCATE TABLE pet_photos, pets RESTART IDENTITY CASCADE;` between tests instead of recreating containers.
+- **Fast isolation via `TRUNCATE`**: To keep test suites fast (<3s), suites reuse the container and run `TRUNCATE TABLE pets RESTART IDENTITY CASCADE;` between tests instead of recreating containers.
 - **Docker & Colima**: Automatically detects Colima on macOS (`~/.colima/default/docker.sock`). Set `DATABASE_URL` to point tests at an existing database instead.
 - **Pure unit tests**: Logic without database dependencies (config, CORS, auth headers, validation helpers) runs in-memory.
+- **Build-tagged separation**: Container-backed suites sit behind `//go:build integration`
+  in `*_integration_test.go` files, so `just test` stays fast and needs no Docker,
+  while `just test-integration` runs everything.
+- **Race detector everywhere**: both `just test` and `just test-integration` run `-race`.
+- **Fuzzing**: the pure core in [`internal/pet/core.go`](internal/pet/core.go) has fuzz
+  targets in [`fuzz_test.go`](internal/pet/fuzz_test.go) that assert invariants rather
+  than fixed outputs — for example, that a pet accepted by `newPetInput` always has
+  trimmed, non-blank fields and non-nil slices, whatever bytes arrived on the wire.
+- **Golden schema snapshot**: [`internal/db/testdata/schema.golden`](internal/db/testdata/schema.golden)
+  pins the schema the migrations produce, so a migration that drops a column or
+  loosens a constraint shows up as a reviewable diff. Refresh it with
+  `go test -tags=integration -run TestSchemaGolden ./internal/db/ -update`.
+- **End-to-end in-process**: [`cmd/server/integration_test.go`](cmd/server/integration_test.go)
+  drives the fully wired `run()` on an OS-assigned port as a real HTTP client.
 - **Frontend mocks**: Web tests in `web/` use [FauxRPC](https://github.com/sudorandom/fauxrpc) stubs to test UI states without a running backend.
+
+---
+
+## ⚙️ Configuration
+
+Every setting is read from the environment at startup. The service defaults to a
+development posture so an unconfigured checkout runs; set `APP_ENV=production` (or
+`DEV_MODE=false`) and no credential, token, or CORS origin is ever invented for you.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `8080` | Public listen port |
+| `DATABASE_URL` | local postgres | PostgreSQL connection string |
+| `APP_ENV` | `development` | `production` switches to the strict posture |
+| `DEV_MODE` | derived from `APP_ENV` | Explicit override |
+| `AUTO_MIGRATE` | `true` in dev | Apply migrations on startup |
+| `AUTH_ENABLED` | `true` | Enforce authentication |
+| `AUTH_TOKENS` | dev token in dev | Comma-separated static bearer tokens |
+| `TRUST_PROXY_HEADERS` | `false` | Accept upstream IAP / OAuth2-Proxy identity headers |
+| `DEV_EMAIL` | `developer@local.test` | Identity injected in dev mode |
+| `CORS_ALLOWED_ORIGINS` | localhost in dev | Comma-separated; `*` is dropped, as credentialed CORS forbids it |
+| `TLS_CERT_FILE` / `TLS_KEY_FILE` | `.certs/*.pem` | Serve TLS when both exist, otherwise cleartext |
+| `LOG_LEVEL` | `debug` in dev, `info` otherwise | `debug`, `info`, `warn`, `error` |
+| `LOG_FORMAT` | `text` in dev, `json` otherwise | `json` for production collectors |
+| `ADMIN_ADDR` | `127.0.0.1:9090` | Admin listener; `off` disables it |
+| `TRACE_SNAPSHOT_DIR` | unset | Enables the flight recorder and names the snapshot directory |
+| `RATE_LIMIT_RPS` | `200` | Per-instance admission rate; `0` disables it |
+| `OTEL_SERVICE_NAME` | `pets-service` | Resource attribute shared by traces and metrics |
+| `OTEL_TRACES_EXPORTER` | `otlp` if an endpoint is set, else `none` | `otlp`, `stdout`, `none` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP gRPC collector address |
+| `OTEL_SAMPLE_PERCENTAGE` | `100` | Root-span sampling; accepts a trailing `%` |
+| `OTEL_CONFIG_FILE` | unset | Optional YAML/JSON/TOML telemetry config, overlaid by the environment |
+
+Startup refuses to proceed if authentication is enabled in production with no
+credential source configured — neither `TRUST_PROXY_HEADERS` nor `AUTH_TOKENS`.
+
+---
+
+## 🛡️ Resilience
+
+Backed by [failsafe-go](https://failsafe-go.dev), scoped to failures this service
+actually has:
+
+- **Retry with exponential backoff and jitter** on read paths only, and only for
+  SQLSTATEs known to be transient *and* known not to have applied — serialization
+  failures, deadlocks, and connection-class errors. Writes are non-idempotent, so
+  they deliberately stay outside the retry policy: replaying one that may already
+  have committed is worse than surfacing the error.
+- **Circuit breaker** on the database path, so an outage fails fast with
+  `Unavailable` instead of parking every request on a connection-pool wait. Its
+  predicate ignores caller errors — a stream of constraint violations means bad
+  requests, not an unhealthy database, and must not trip it.
+- **Rate limiting** as a Connect interceptor (`RATE_LIMIT_RPS`), using a smooth
+  limiter so permits are spaced evenly rather than arriving as a burst.
+- **Per-RPC deadlines**, so one slow query cannot hold a pool connection for as long
+  as a client is willing to wait. A stricter client deadline is honoured; a more
+  generous one is clamped.
+- **Explicit connection pool bounds**, rather than pgx's CPU-derived default, which
+  is also what makes the circuit breaker meaningful — without a ceiling an outage
+  just grows the pool's wait queue.
 
 ---
 

@@ -1,6 +1,10 @@
 # Binaries and build artifacts
 bin/
 dist/
+# Binaries produced by `go build` in the repo root, named after their cmd/ package
+/server
+/migrate
+coverage.out
 *.exe
 *.exe~
 *.dll

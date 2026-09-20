@@ -7,11 +7,16 @@ certs:
     mkcert -install
     mkcert -cert-file .certs/cert.pem -key-file .certs/key.pem localhost 127.0.0.1 ::1
 
-# Install all toolchains via mise, generate TLS certs, and install frontend dependencies
+# Install all toolchains via mise, generate TLS certs, install frontend deps and git hooks
 setup:
     mise install
     just certs
+    just hooks
     cd web && pnpm install
+
+# Install the lefthook git hooks (pre-commit, pre-push, commit-msg)
+hooks:
+    lefthook install
 
 # Regenerate Protobuf, Connect stubs, OpenAPI specs, TypeScript types, and descriptor image
 generate:
@@ -25,24 +30,76 @@ build:
     go build -v ./...
     cd web && pnpm build
 
-# Run unit tests (auth & protovalidate)
+# Run the fast unit suite: race detector on, no Docker required
 test:
-    go test -v ./internal/...
+    go test -race ./...
 
-# Run golangci-lint with gosec security analysis
+# Run the unit suite with a coverage report (a report for humans, not a gate)
+test-cover:
+    go test -race -coverprofile=coverage.out -covermode=atomic ./...
+    go tool cover -func=coverage.out | tail -1
+    @echo "HTML report: go tool cover -html=coverage.out"
+
+# Run golangci-lint over both build configurations
 lint:
-    golangci-lint run
+    golangci-lint run ./...
+    golangci-lint run --build-tags=integration ./...
+
+# Auto-fix what the linters can fix, then report what is left
+lint-fix:
+    golangci-lint run --fix ./...
+
+# Verify go.mod/go.sum are tidy (CI runs this; a dirty tree fails the build)
+tidy-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cp go.mod /tmp/go.mod.bak && cp go.sum /tmp/go.sum.bak
+    go mod tidy
+    if ! diff -q /tmp/go.mod.bak go.mod >/dev/null || ! diff -q /tmp/go.sum.bak go.sum >/dev/null; then
+        echo "go.mod/go.sum are not tidy; run 'go mod tidy' and commit the result" >&2
+        exit 1
+    fi
+    echo "go.mod and go.sum are tidy"
 
 # Run govulncheck vulnerability scanner
 vulncheck:
     govulncheck ./...
 
-# Run all quality & security checks (lint, vulncheck, unit tests, frontend mock tests)
-check: lint vulncheck test test-web
+# Run every quality and security gate the CI pipeline runs
+check: tidy-check lint vulncheck test test-web
 
-# Run all tests (including integration tests)
+# Run the container-backed suites (needs a running Docker/Colima daemon)
 test-integration:
-    go test -v ./test/...
+    go test -race -tags=integration -count=1 ./...
+
+# Fuzz one target in the pure core, e.g. `just fuzz FuzzParseDate 60s`
+fuzz target="FuzzNewPetInput" duration="30s":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # `go test -fuzz` exits 0 when the pattern matches nothing, so a renamed or
+    # deleted target would silently "pass". Check it exists first.
+    if ! go test -list '^Fuzz' ./internal/pet/ | grep -qx '{{target}}'; then
+        echo "no such fuzz target: {{target}}" >&2
+        go test -list '^Fuzz' ./internal/pet/ | grep '^Fuzz' >&2
+        exit 1
+    fi
+    go test -run='^$' -fuzz='^{{target}}$' -fuzztime={{duration}} ./internal/pet/
+
+# Fuzz every target in the core for a short burst each (what CI runs)
+fuzz-all duration="20s":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The list is derived from the source rather than hard-coded, so a target added
+    # or removed in fuzz_test.go cannot silently drop out of the sweep.
+    targets=$(go test -list '^Fuzz' ./internal/pet/ | grep '^Fuzz')
+    if [ -z "$targets" ]; then
+        echo "no fuzz targets found in ./internal/pet/" >&2
+        exit 1
+    fi
+    for target in $targets; do
+        echo "== $target"
+        go test -run='^$' -fuzz="^${target}$" -fuzztime={{duration}} ./internal/pet/
+    done
 
 # Start PostgreSQL container via docker-compose
 up:

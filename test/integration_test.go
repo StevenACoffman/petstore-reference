@@ -1,3 +1,5 @@
+//go:build integration
+
 package test
 
 import (
@@ -11,13 +13,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/sudorandom/protojsonx/protojsonxconnect"
+
 	petv1 "github.com/example/pets/gen/go/pet/v1"
 	"github.com/example/pets/gen/go/pet/v1/petv1connect"
 	"github.com/example/pets/internal/auth"
 	"github.com/example/pets/internal/pet"
 	"github.com/example/pets/internal/telemetry"
 	"github.com/example/pets/internal/testutil"
-	"github.com/sudorandom/protojsonx/protojsonxconnect"
 )
 
 type PetServiceIntegrationTestSuite struct {
@@ -106,19 +109,19 @@ func (s *PetServiceIntegrationTestSuite) TestPetLifecycle() {
 		resp, err := s.client.CreatePet(s.ctx, req)
 		s.Require().NoError(err, "CreatePet failed")
 		s.Require().NotNil(resp.Msg)
-		s.Require().NotNil(resp.Msg.Pet)
+		s.Require().NotNil(resp.Msg.GetPet())
 
-		s.Equal("Milo", resp.Msg.Pet.Name)
-		s.Equal("2023-05-10", resp.Msg.Pet.BirthDate)
-		s.False(resp.Msg.Pet.BirthDateEstimated)
-		s.Equal([]string{"https://example.com/milo1.jpg"}, resp.Msg.Pet.PhotoUrls)
-		s.NotEmpty(resp.Msg.Pet.Id)
-		s.NotEmpty(resp.Msg.Pet.CreatedBy)
-		s.NotEmpty(resp.Msg.Pet.ModifiedBy)
-		s.NotNil(resp.Msg.Pet.CreatedAt)
-		s.NotNil(resp.Msg.Pet.ModifiedAt)
+		s.Equal("Milo", resp.Msg.GetPet().GetName())
+		s.Equal("2023-05-10", resp.Msg.GetPet().GetBirthDate())
+		s.False(resp.Msg.GetPet().GetBirthDateEstimated())
+		s.Equal([]string{"https://example.com/milo1.jpg"}, resp.Msg.GetPet().GetPhotoUrls())
+		s.NotEmpty(resp.Msg.GetPet().GetId())
+		s.NotEmpty(resp.Msg.GetPet().GetCreatedBy())
+		s.NotEmpty(resp.Msg.GetPet().GetModifiedBy())
+		s.NotNil(resp.Msg.GetPet().GetCreatedAt())
+		s.NotNil(resp.Msg.GetPet().GetModifiedAt())
 
-		s.createdPetID = resp.Msg.Pet.Id
+		s.createdPetID = resp.Msg.GetPet().GetId()
 	})
 
 	s.Run("GetPet", func() {
@@ -130,9 +133,9 @@ func (s *PetServiceIntegrationTestSuite) TestPetLifecycle() {
 		resp, err := s.client.GetPet(s.ctx, req)
 		s.Require().NoError(err, "GetPet failed")
 		s.Require().NotNil(resp.Msg)
-		s.Require().NotNil(resp.Msg.Pet)
-		s.Equal(s.createdPetID, resp.Msg.Pet.Id)
-		s.Equal([]string{"https://example.com/milo1.jpg"}, resp.Msg.Pet.PhotoUrls)
+		s.Require().NotNil(resp.Msg.GetPet())
+		s.Equal(s.createdPetID, resp.Msg.GetPet().GetId())
+		s.Equal([]string{"https://example.com/milo1.jpg"}, resp.Msg.GetPet().GetPhotoUrls())
 	})
 
 	s.Run("ListPets", func() {
@@ -145,7 +148,7 @@ func (s *PetServiceIntegrationTestSuite) TestPetLifecycle() {
 		resp, err := s.client.ListPets(s.ctx, req)
 		s.Require().NoError(err, "ListPets failed")
 		s.Require().NotNil(resp.Msg)
-		s.NotEmpty(resp.Msg.Pets)
+		s.NotEmpty(resp.Msg.GetPets())
 	})
 
 	s.Run("UpdatePet", func() {
@@ -166,12 +169,12 @@ func (s *PetServiceIntegrationTestSuite) TestPetLifecycle() {
 		resp, err := s.client.UpdatePet(s.ctx, req)
 		s.Require().NoError(err, "UpdatePet failed")
 		s.Require().NotNil(resp.Msg)
-		s.Require().NotNil(resp.Msg.Pet)
-		s.Equal("Milo The Great", resp.Msg.Pet.Name)
-		s.Equal("2022-04-12", resp.Msg.Pet.BirthDate)
-		s.True(resp.Msg.Pet.BirthDateEstimated)
-		s.Equal(petv1.PetStatus_PET_STATUS_ADOPTED, resp.Msg.Pet.Status)
-		s.Equal([]string{"https://example.com/milo-updated.jpg"}, resp.Msg.Pet.PhotoUrls)
+		s.Require().NotNil(resp.Msg.GetPet())
+		s.Equal("Milo The Great", resp.Msg.GetPet().GetName())
+		s.Equal("2022-04-12", resp.Msg.GetPet().GetBirthDate())
+		s.True(resp.Msg.GetPet().GetBirthDateEstimated())
+		s.Equal(petv1.PetStatus_PET_STATUS_ADOPTED, resp.Msg.GetPet().GetStatus())
+		s.Equal([]string{"https://example.com/milo-updated.jpg"}, resp.Msg.GetPet().GetPhotoUrls())
 	})
 
 	s.Run("DeletePet", func() {
@@ -183,7 +186,7 @@ func (s *PetServiceIntegrationTestSuite) TestPetLifecycle() {
 		resp, err := s.client.DeletePet(s.ctx, req)
 		s.Require().NoError(err, "DeletePet failed")
 		s.Require().NotNil(resp.Msg)
-		s.True(resp.Msg.Success)
+		s.True(resp.Msg.GetSuccess())
 
 		// Verify pet is gone
 		getReq := connect.NewRequest(&petv1.GetPetRequest{Id: s.createdPetID})
@@ -239,8 +242,8 @@ func (s *PetServiceIntegrationTestSuite) TestFilteringAndPagination() {
 	dogReq.Header().Set("Authorization", "Bearer test-token")
 	dogResp, err := s.client.ListPets(s.ctx, dogReq)
 	s.Require().NoError(err)
-	s.Equal(int32(2), dogResp.Msg.TotalCount)
-	s.Len(dogResp.Msg.Pets, 2)
+	s.Equal(int32(2), dogResp.Msg.GetTotalCount())
+	s.Len(dogResp.Msg.GetPets(), 2)
 
 	// Filter by status "AVAILABLE"
 	availReq := connect.NewRequest(&petv1.ListPetsRequest{
@@ -249,8 +252,8 @@ func (s *PetServiceIntegrationTestSuite) TestFilteringAndPagination() {
 	availReq.Header().Set("Authorization", "Bearer test-token")
 	availResp, err := s.client.ListPets(s.ctx, availReq)
 	s.Require().NoError(err)
-	s.Equal(int32(3), availResp.Msg.TotalCount)
-	s.Len(availResp.Msg.Pets, 3)
+	s.Equal(int32(3), availResp.Msg.GetTotalCount())
+	s.Len(availResp.Msg.GetPets(), 3)
 
 	// Pagination: pageSize=2, page=0
 	page0Req := connect.NewRequest(&petv1.ListPetsRequest{
@@ -260,8 +263,8 @@ func (s *PetServiceIntegrationTestSuite) TestFilteringAndPagination() {
 	page0Req.Header().Set("Authorization", "Bearer test-token")
 	page0Resp, err := s.client.ListPets(s.ctx, page0Req)
 	s.Require().NoError(err)
-	s.Equal(int32(5), page0Resp.Msg.TotalCount)
-	s.Len(page0Resp.Msg.Pets, 2)
+	s.Equal(int32(5), page0Resp.Msg.GetTotalCount())
+	s.Len(page0Resp.Msg.GetPets(), 2)
 
 	// Pagination: pageSize=2, page=2 (should return 1 pet)
 	page2Req := connect.NewRequest(&petv1.ListPetsRequest{
@@ -271,10 +274,13 @@ func (s *PetServiceIntegrationTestSuite) TestFilteringAndPagination() {
 	page2Req.Header().Set("Authorization", "Bearer test-token")
 	page2Resp, err := s.client.ListPets(s.ctx, page2Req)
 	s.Require().NoError(err)
-	s.Equal(int32(5), page2Resp.Msg.TotalCount)
-	s.Len(page2Resp.Msg.Pets, 1)
+	s.Equal(int32(5), page2Resp.Msg.GetTotalCount())
+	s.Len(page2Resp.Msg.GetPets(), 1)
 }
 
+// TRUNCATE between them; running it in parallel would make failures ambiguous.
+//
+//nolint:paralleltest // the suite shares one Postgres container and isolates cases with
 func TestPetServiceIntegrationTestSuite(t *testing.T) {
 	suite.Run(t, new(PetServiceIntegrationTestSuite))
 }
