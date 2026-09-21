@@ -67,6 +67,18 @@ Contract comments on anything non-trivial, but keep them to a line each: if
 `Requires` needs more than a sentence the function has too many entry conditions,
 and if `Ensures` enumerates cases it does too much.
 
+## Authorization
+
+- Action authorization lives in `internal/authz`: a declarative role × action
+  matrix, deny by default, `admin` bypasses. Adding an RPC does **not** open it —
+  name it in `AUTHZ_POLICY` or only admins can call it.
+- Never hardcode a role check in a handler. A hardcoded check is invisible to
+  whoever operates the service and needs a code change to adjust.
+- §6 says authorization belongs in SQL `WHERE` clauses. That governs *row*
+  filtering; this is *action* permission, which has no row-leak failure mode. Add
+  row rules to the query when the domain needs them; the two compose.
+- No ownership check by design: shelter staff edit each other's records.
+
 ## Errors
 
 - Nothing from `pgx` or `pgconn` escapes `internal/pet`. `translate(ctx, op, err)`

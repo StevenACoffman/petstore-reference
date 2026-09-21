@@ -126,6 +126,14 @@ func TestRunServesEndToEnd(t *testing.T) {
 		assert.Contains(t, body, "Petstore API Reference")
 	})
 
+	// The shipped policy denies everything but admin, and the local dev identity is
+	// an admin. This asserts that `just run` works with no AUTHZ_POLICY configured.
+	// Verified non-vacuous: with DEV_ROLES=user it fails with permission_denied.
+	t.Run("an RPC succeeds in dev with no policy configured", func(t *testing.T) {
+		body, status := post(ctx, t, baseURL+"/pet.v1.PetService/ListPets", `{}`)
+		assert.Equal(t, http.StatusOK, status, "body: %s", body)
+	})
+
 	t.Run("an unknown path is a 404", func(t *testing.T) {
 		_, status := get(ctx, t, baseURL+"/no-such-route")
 		assert.Equal(t, http.StatusNotFound, status)
@@ -179,6 +187,22 @@ func waitForReady(ctx context.Context, timeout time.Duration, endpoint string) e
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// post sends a Connect JSON request and returns the body and status.
+func post(ctx context.Context, t *testing.T, url, payload string) (body string, status int) {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(payload))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return string(raw), resp.StatusCode
 }
 
 func get(ctx context.Context, t *testing.T, url string) (body string, status int) {

@@ -261,6 +261,7 @@ token or CORS origin for you.
 | `ADMIN_ADDR` | `127.0.0.1:9090` | Admin listener; `off` disables it |
 | `TRACE_SNAPSHOT_DIR` | unset | Enables the flight recorder and names the snapshot directory |
 | `RATE_LIMIT_RPS` | `200` | Per-instance admission rate; `0` disables it |
+| `AUTHZ_POLICY` | empty (admin only) | Role matrix: `procedure=role,role` entries separated by `;` or newlines |
 | `OTEL_SERVICE_NAME` | `pets-service` | Resource attribute shared by traces and metrics |
 | `OTEL_TRACES_EXPORTER` | `otlp` if an endpoint is set, else `none` | `otlp`, `stdout`, `none` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP gRPC collector address |
@@ -269,6 +270,41 @@ token or CORS origin for you.
 
 Startup refuses to proceed if authentication is enabled in production with neither
 `TRUST_PROXY_HEADERS` nor `AUTH_TOKENS` set.
+
+---
+
+## 🔑 Authorization
+
+Authentication establishes *who* you are; authorization decides *what you may do*.
+The model is the conventional petstore one: a declarative role × action matrix,
+**deny by default**, with an `admin` bypass so an operator cannot lock themselves out.
+
+```bash
+AUTHZ_POLICY="
+/pet.v1.PetService/ListPets=viewer,editor
+/pet.v1.PetService/GetPet=viewer,editor
+/pet.v1.PetService/CreatePet=editor
+/pet.v1.PetService/UpdatePet=editor
+/pet.v1.PetService/DeletePet=editor
+"
+```
+
+Roles come from the caller's claims — `X-Forwarded-Groups` behind oauth2-proxy, or
+`DEV_ROLES` locally. A procedure the matrix does not name is refused, so adding an
+RPC cannot silently open it, and a malformed policy fails startup rather than
+falling back to something permissive.
+
+This is *action* authorization — may this role call `DeletePet` at all. Row-level
+rules belong in SQL `WHERE` clauses, where the database enforces them; the two
+compose. There is deliberately **no ownership check**: shelter staff edit each
+other's records, which is why the reference petstore models
+[RBAC](https://github.com/permitio/opal-example-policy-repo) as role × action
+rather than per-record ownership.
+
+> **Upgrading an existing deployment:** the shipped default denies everything to
+> everyone but `admin`, so the service will refuse traffic until `AUTHZ_POLICY` is
+> set. That is deliberate — the safe posture is closed — but it is a breaking
+> change. Local development is unaffected: the dev identity is an admin.
 
 ---
 

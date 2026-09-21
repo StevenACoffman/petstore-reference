@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/example/pets/gen/go/pet/v1/petv1connect"
 	"github.com/example/pets/internal/auth"
+	"github.com/example/pets/internal/authz"
 	"github.com/example/pets/internal/config"
 	"github.com/example/pets/internal/pet"
 	"github.com/example/pets/internal/resilience"
@@ -35,6 +37,20 @@ func newServerHandler(cfg *config.Config, pool *pgxpool.Pool, resilientDB *resil
 		return nil, fmt.Errorf("initialising opentelemetry connect interceptor: %w", err)
 	}
 
+	// A malformed policy fails startup. Falling back to a default would either
+	// open procedures the operator meant to close or close ones they meant to
+	// open, and neither shows up until someone is affected.
+	rules, err := authz.ParseRules(cfg.AuthzPolicy)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", config.EnvAuthzPolicy, err)
+	}
+	policy := authz.NewPolicy(rules)
+	// With deny-by-default, an operator needs to see at boot what the policy opened.
+	slog.Info("authorization policy loaded",
+		"procedures", policy.Procedures(),
+		"note", "unlisted procedures are admin-only",
+	)
+
 	authCfg := auth.Config{
 		Enabled:           cfg.AuthEnabled,
 		DevMode:           cfg.DevMode,
@@ -44,7 +60,7 @@ func newServerHandler(cfg *config.Config, pool *pgxpool.Pool, resilientDB *resil
 	}
 
 	mux := http.NewServeMux()
-	addRoutes(mux, cfg, pool, resilientDB, authCfg, otelInterceptor)
+	addRoutes(mux, cfg, pool, resilientDB, authCfg, policy, otelInterceptor)
 
 	// Global middleware is applied here, once, rather than repeated per route.
 	var handler http.Handler = mux
@@ -62,12 +78,14 @@ func addRoutes(
 	pool *pgxpool.Pool,
 	resilientDB *resilience.DB,
 	authCfg auth.Config,
+	policy *authz.Policy,
 	otelInterceptor connect.Interceptor,
 ) {
-	// Interceptor order is the request's path inwards. Tracing is outermost so a
-	// rejected request still produces a span; the deadline is applied next so it
-	// covers everything after it, including time spent waiting for a rate-limit
-	// permit; validation and authentication run last, on requests actually admitted.
+	// Interceptor order is the request's path inwards: tracing outermost so a
+	// rejected request still produces a span, then the deadline so it covers
+	// everything after it, then load shedding, then authentication, then
+	// authorization, and validation last — there is no point parsing a body the
+	// caller was never allowed to send.
 	interceptors := []connect.Interceptor{
 		otelInterceptor,
 		resilience.NewTimeoutInterceptor(resilience.DefaultRequestTimeout),
@@ -79,7 +97,11 @@ func addRoutes(
 	if rateLimit.Enabled() {
 		interceptors = append(interceptors, resilience.NewRateLimitInterceptor(rateLimit))
 	}
-	interceptors = append(interceptors, validate.NewInterceptor(), auth.NewInterceptor(authCfg))
+	interceptors = append(interceptors,
+		auth.NewInterceptor(authCfg),
+		authz.NewInterceptor(policy),
+		validate.NewInterceptor(),
+	)
 
 	petPath, connectHandler := petv1connect.NewPetServiceHandler(
 		pet.NewHandler(pool).WithResilience(resilientDB),

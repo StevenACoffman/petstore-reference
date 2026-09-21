@@ -16,6 +16,7 @@ const (
 	EnvAutoMigrate       = "AUTO_MIGRATE"
 	EnvDevEmail          = "DEV_EMAIL"
 	EnvDevRoles          = "DEV_ROLES"
+	EnvAuthzPolicy       = "AUTHZ_POLICY"
 	EnvAuthEnabled       = "AUTH_ENABLED"
 	EnvAuthTokens        = "AUTH_TOKENS"
 	EnvTrustProxyHeaders = "TRUST_PROXY_HEADERS"
@@ -67,6 +68,9 @@ type Config struct {
 	TraceSnapshotDir string
 	// RateLimitRPS admitted per instance; zero disables admission control.
 	RateLimitRPS uint
+	// AuthzPolicy is the raw role matrix, procedure=role[,role] separated by
+	// semicolons or newlines. Empty denies everything but admin.
+	AuthzPolicy string
 }
 
 // AdminEnabled reports whether the admin listener should be started.
@@ -128,6 +132,7 @@ func Load(getenv func(string) string) *Config {
 		AdminAddr:         stringOr(getenv(EnvAdminAddr), DefaultAdminAddr),
 		TraceSnapshotDir:  getenv(EnvTraceSnapshotDir),
 		RateLimitRPS:      uintOr(getenv(EnvRateLimitRPS), DefaultRateLimitRPS),
+		AuthzPolicy:       getenv(EnvAuthzPolicy),
 	}
 }
 
