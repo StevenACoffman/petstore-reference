@@ -8,10 +8,14 @@ package profiling
 
 import (
 	"fmt"
+	"net/http"
 	"runtime"
 	"strings"
 
 	"github.com/grafana/pyroscope-go"
+	// x/k6 is an experimental module of pyroscope-go; it carries no compatibility
+	// promise, which is the trade for not reimplementing its baggage parsing.
+	k6 "github.com/grafana/pyroscope-go/x/k6"
 )
 
 // Environment variables recognised by LoadConfig.
@@ -130,4 +134,18 @@ func Start(cfg Config) (stop func(), err error) {
 		runtime.SetMutexProfileFraction(0)
 		runtime.SetBlockProfileRate(0)
 	}, nil
+}
+
+// K6LabelsMiddleware tags profile samples with the k6 test run and scenario that
+// produced them, by reading the Baggage header.
+//
+// k6 does not send that header on its own — the test script sets it. Only
+// `k6.`-prefixed keys are kept, with dots rewritten to underscores, so
+// `k6.test_run_id` becomes the label `k6_test_run_id`.
+//
+// Costs ~13ns per request with no Baggage header, so it is applied
+// unconditionally; the labels also reach anything reading pprof directly, not
+// only a Pyroscope push.
+func K6LabelsMiddleware() func(http.Handler) http.Handler {
+	return k6.LabelsFromBaggageHandler
 }

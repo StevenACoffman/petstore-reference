@@ -160,6 +160,13 @@ migrate-down:
 migrate-status:
     go run ./cmd/migrate status
 
+# Profiles are sliced by run and scenario only when the server has
+# PYROSCOPE_ENDPOINT set; `just up` starts a Pyroscope for it.
+#
+# Drive load at a running server with k6
+load-test duration="30s" vus="5":
+    DURATION={{duration}} VUS={{vus}} k6 run k6/load.js
+
 # Run the Go microservice
 run:
     go run ./cmd/server

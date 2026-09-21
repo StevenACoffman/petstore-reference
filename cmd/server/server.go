@@ -18,6 +18,7 @@ import (
 	"github.com/example/pets/internal/authz"
 	"github.com/example/pets/internal/config"
 	"github.com/example/pets/internal/pet"
+	"github.com/example/pets/internal/profiling"
 	"github.com/example/pets/internal/resilience"
 	"github.com/example/pets/internal/telemetry"
 )
@@ -64,6 +65,10 @@ func newServerHandler(cfg *config.Config, pool *pgxpool.Pool, resilientDB *resil
 
 	// Global middleware is applied here, once, rather than repeated per route.
 	var handler http.Handler = mux
+	// Outermost, so the labels cover the whole request. Applied unconditionally:
+	// it costs ~13ns when no Baggage header is present, and the labels are useful
+	// to anything reading pprof on the admin listener, not only to Pyroscope.
+	handler = profiling.K6LabelsMiddleware()(handler)
 	if cfg.DevMode {
 		handler = auth.DevIdentityMiddleware(cfg.DevEmail, auth.DefaultDevSubject, cfg.DevRoles)(handler)
 	}

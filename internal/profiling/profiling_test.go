@@ -1,7 +1,10 @@
 package profiling_test
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"runtime"
+	"runtime/pprof"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -131,4 +134,79 @@ func TestStartRejectsAnUnusableEndpoint(t *testing.T) {
 	}
 	assert.Equal(t, 0, runtime.SetMutexProfileFraction(-1),
 		"a failed start must not leave contention sampling on")
+}
+
+// TestK6LabelsMiddleware pins the contract the k6 script depends on: the Baggage
+// header becomes pprof labels, and only the k6 ones do.
+func TestK6LabelsMiddleware(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		baggage string
+		want    map[string]string
+	}{
+		"k6 keys become labels, dots to underscores": {
+			baggage: "k6.test_run_id=run-7,k6.scenario=browse",
+			want:    map[string]string{"k6_test_run_id": "run-7", "k6_scenario": "browse"},
+		},
+		"non-k6 keys are dropped": {
+			baggage: "k6.scenario=browse,tenant=acme,userId=42",
+			want:    map[string]string{"k6_scenario": "browse"},
+		},
+		"no header means no labels": {
+			baggage: "",
+			want:    map[string]string{},
+		},
+		"a malformed header is ignored rather than fatal": {
+			baggage: "this is not baggage",
+			want:    map[string]string{},
+		},
+		"an empty value is dropped": {
+			baggage: "k6.scenario=,k6.test_run_id=run-7",
+			want:    map[string]string{"k6_test_run_id": "run-7"},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := map[string]string{}
+			inner := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				pprof.ForLabels(r.Context(), func(k, v string) bool {
+					got[k] = v
+					return true
+				})
+			})
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
+			if tc.baggage != "" {
+				req.Header.Set("Baggage", tc.baggage)
+			}
+			require.NotPanics(t, func() {
+				profiling.K6LabelsMiddleware()(inner).ServeHTTP(httptest.NewRecorder(), req)
+			})
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestK6LabelsDoNotLeakPastTheRequest: goroutine labels are process state, so a
+// handler that finishes must not leave them set for whatever runs next.
+func TestK6LabelsDoNotLeakPastTheRequest(t *testing.T) {
+	t.Parallel()
+
+	inner := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
+	req.Header.Set("Baggage", "k6.test_run_id=run-7")
+
+	profiling.K6LabelsMiddleware()(inner).ServeHTTP(httptest.NewRecorder(), req)
+
+	after := map[string]string{}
+	pprof.ForLabels(t.Context(), func(k, v string) bool {
+		after[k] = v
+		return true
+	})
+	assert.Empty(t, after, "labels must not outlive the request that set them")
 }
