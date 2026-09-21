@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation } from '@connectrpc/connect-query';
 import { useQueryClient } from '@tanstack/react-query';
-import { PetService, PetStatus } from '../gen/pet/v1/pet_pb';
+import { PetService, PetStatus } from '../gen/pet/v2/pet_pb';
 import { Layout } from '../components/Layout';
 import { PetImage } from '../components/PetImage';
 import { formatTimestamp, calculateAge } from '../lib/date';

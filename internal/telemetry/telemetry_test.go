@@ -17,8 +17,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
-	petv1 "github.com/example/pets/gen/go/pet/v1"
-	"github.com/example/pets/gen/go/pet/v1/petv1connect"
+	petv2 "github.com/example/pets/gen/go/pet/v2"
+	"github.com/example/pets/gen/go/pet/v2/petv2connect"
 )
 
 // fakeEnv returns a getenv function backed by a map, so config tests never touch
@@ -372,7 +372,7 @@ func TestInitAndConnectInterceptor(t *testing.T) {
 
 	// Create a dummy service to test interceptor with incoming W3C traceparent
 	dummySvc := &mockPetService{}
-	_, handler := petv1connect.NewPetServiceHandler(
+	_, handler := petv2connect.NewPetServiceHandler(
 		dummySvc,
 		connect.WithInterceptors(interceptor),
 	)
@@ -380,14 +380,14 @@ func TestInitAndConnectInterceptor(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	client := petv1connect.NewPetServiceClient(server.Client(), server.URL)
+	client := petv2connect.NewPetServiceClient(server.Client(), server.URL)
 
 	// Simulate frontend-created W3C traceparent header
 	frontendTraceID := "4bf92f3577b34da6a3ce929d0e0e4736"
 	frontendSpanID := "00f067aa0ba902b7"
 	traceparent := "00-" + frontendTraceID + "-" + frontendSpanID + "-01"
 
-	req := connect.NewRequest(&petv1.GetPetRequest{Id: "test-id"})
+	req := connect.NewRequest(&petv2.GetPetRequest{Id: "test-id"})
 	req.Header().Set("traceparent", traceparent)
 
 	_, err = client.GetPet(ctx, req)
@@ -409,18 +409,18 @@ func TestInitAndConnectInterceptor(t *testing.T) {
 	assert.True(t, foundAdoptedTrace, "expected backend span to adopt frontend trace ID %s", frontendTraceID)
 }
 
-// mockPetService implements petv1connect.PetServiceHandler for testing
+// mockPetService implements petv2connect.PetServiceHandler for testing
 type mockPetService struct {
-	petv1connect.UnimplementedPetServiceHandler
+	petv2connect.UnimplementedPetServiceHandler
 }
 
-func (m *mockPetService) GetPet(ctx context.Context, req *connect.Request[petv1.GetPetRequest]) (*connect.Response[petv1.GetPetResponse], error) {
+func (m *mockPetService) GetPet(ctx context.Context, req *connect.Request[petv2.GetPetRequest]) (*connect.Response[petv2.GetPetResponse], error) {
 	// Span should be active in context
 	span := trace.SpanFromContext(ctx)
 	if !span.SpanContext().IsValid() {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no valid span in context"))
 	}
-	return connect.NewResponse(&petv1.GetPetResponse{
-		Pet: &petv1.Pet{Id: req.Msg.GetId(), Name: "Fido"},
+	return connect.NewResponse(&petv2.GetPetResponse{
+		Pet: &petv2.Pet{Id: req.Msg.GetId(), Name: "Fido"},
 	}), nil
 }

@@ -1,6 +1,6 @@
 stubs:
   - id: create-pet
-    target: pet.v1.PetService/CreatePet
+    target: pet.v2.PetService/CreatePet
     cel_content: |
       {
         'pet': {

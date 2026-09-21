@@ -1,5 +1,5 @@
 stubs:
   - id: create-pet-already-exists
-    target: pet.v1.PetService/CreatePet
+    target: pet.v2.PetService/CreatePet
     error_code: 6
     error_message: "already exists: a pet with this microchip/name already exists"

@@ -16,8 +16,8 @@ import (
 
 	"github.com/sudorandom/protojsonx/protojsonxconnect"
 
-	petv1 "github.com/example/pets/gen/go/pet/v1"
-	"github.com/example/pets/gen/go/pet/v1/petv1connect"
+	petv2 "github.com/example/pets/gen/go/pet/v2"
+	"github.com/example/pets/gen/go/pet/v2/petv2connect"
 	"github.com/example/pets/internal/auth"
 	"github.com/example/pets/internal/pet"
 	"github.com/example/pets/internal/telemetry"
@@ -32,7 +32,7 @@ type PetServiceIntegrationTestSuite struct {
 	testDB       *testutil.TestDB
 	pool         *pgxpool.Pool
 	server       *httptest.Server
-	client       petv1connect.PetServiceClient
+	client       petv2connect.PetServiceClient
 	createdPetID string
 }
 
@@ -59,7 +59,7 @@ func (s *PetServiceIntegrationTestSuite) SetupSuite() {
 	}
 	authInterceptor := auth.NewInterceptor(authCfg)
 
-	path, handler := petv1connect.NewPetServiceHandler(
+	path, handler := petv2connect.NewPetServiceHandler(
 		petHandler,
 		connect.WithCodec(&protojsonxconnect.Codec{}),
 		connect.WithInterceptors(otelInterceptor, valInterceptor, authInterceptor),
@@ -69,7 +69,7 @@ func (s *PetServiceIntegrationTestSuite) SetupSuite() {
 	mux.Handle(path, handler)
 	s.server = httptest.NewServer(mux)
 
-	s.client = petv1connect.NewPetServiceClient(
+	s.client = petv2connect.NewPetServiceClient(
 		s.server.Client(),
 		s.server.URL,
 		connect.WithCodec(&protojsonxconnect.Codec{}),
@@ -96,12 +96,12 @@ func (s *PetServiceIntegrationTestSuite) SetupTest() {
 
 func (s *PetServiceIntegrationTestSuite) TestPetLifecycle() {
 	s.Run("CreatePet", func() {
-		req := connect.NewRequest(&petv1.CreatePetRequest{
+		req := connect.NewRequest(&petv2.CreatePetRequest{
 			Name:               "Milo",
 			Species:            "Dog",
 			BirthDate:          "2023-05-10",
 			BirthDateEstimated: false,
-			Status:             petv1.PetStatus_PET_STATUS_AVAILABLE,
+			Status:             petv2.PetStatus_PET_STATUS_AVAILABLE,
 			Tags:               []string{"friendly", "playful"},
 			PhotoUrls:          []string{"https://example.com/milo1.jpg"},
 		})
@@ -128,7 +128,7 @@ func (s *PetServiceIntegrationTestSuite) TestPetLifecycle() {
 	s.Run("GetPet", func() {
 		s.Require().NotEmpty(s.createdPetID, "skipping GetPet because CreatePet did not succeed")
 
-		req := connect.NewRequest(&petv1.GetPetRequest{Id: s.createdPetID})
+		req := connect.NewRequest(&petv2.GetPetRequest{Id: s.createdPetID})
 		req.Header().Set("Authorization", "Bearer test-token")
 
 		resp, err := s.client.GetPet(s.ctx, req)
@@ -140,7 +140,7 @@ func (s *PetServiceIntegrationTestSuite) TestPetLifecycle() {
 	})
 
 	s.Run("ListPets", func() {
-		req := connect.NewRequest(&petv1.ListPetsRequest{
+		req := connect.NewRequest(&petv2.ListPetsRequest{
 			Species:  "Dog",
 			PageSize: 10,
 		})
@@ -155,13 +155,13 @@ func (s *PetServiceIntegrationTestSuite) TestPetLifecycle() {
 	s.Run("UpdatePet", func() {
 		s.Require().NotEmpty(s.createdPetID, "skipping UpdatePet")
 
-		req := connect.NewRequest(&petv1.UpdatePetRequest{
+		req := connect.NewRequest(&petv2.UpdatePetRequest{
 			Id:                 s.createdPetID,
 			Name:               new("Milo The Great"),
 			Species:            new("Dog"),
 			BirthDate:          new("2022-04-12"),
 			BirthDateEstimated: new(true),
-			Status:             petv1.PetStatus_PET_STATUS_ADOPTED.Enum(),
+			Status:             petv2.PetStatus_PET_STATUS_ADOPTED.Enum(),
 			Tags:               []string{"adopted", "happy"},
 			PhotoUrls:          []string{"https://example.com/milo-updated.jpg"},
 		})
@@ -174,14 +174,14 @@ func (s *PetServiceIntegrationTestSuite) TestPetLifecycle() {
 		s.Equal("Milo The Great", resp.Msg.GetPet().GetName())
 		s.Equal("2022-04-12", resp.Msg.GetPet().GetBirthDate())
 		s.True(resp.Msg.GetPet().GetBirthDateEstimated())
-		s.Equal(petv1.PetStatus_PET_STATUS_ADOPTED, resp.Msg.GetPet().GetStatus())
+		s.Equal(petv2.PetStatus_PET_STATUS_ADOPTED, resp.Msg.GetPet().GetStatus())
 		s.Equal([]string{"https://example.com/milo-updated.jpg"}, resp.Msg.GetPet().GetPhotoUrls())
 	})
 
 	s.Run("DeletePet", func() {
 		s.Require().NotEmpty(s.createdPetID, "skipping DeletePet")
 
-		req := connect.NewRequest(&petv1.DeletePetRequest{Id: s.createdPetID})
+		req := connect.NewRequest(&petv2.DeletePetRequest{Id: s.createdPetID})
 		req.Header().Set("Authorization", "Bearer test-token")
 
 		resp, err := s.client.DeletePet(s.ctx, req)
@@ -190,7 +190,7 @@ func (s *PetServiceIntegrationTestSuite) TestPetLifecycle() {
 		s.True(resp.Msg.GetSuccess())
 
 		// Verify pet is gone
-		getReq := connect.NewRequest(&petv1.GetPetRequest{Id: s.createdPetID})
+		getReq := connect.NewRequest(&petv2.GetPetRequest{Id: s.createdPetID})
 		getReq.Header().Set("Authorization", "Bearer test-token")
 		_, err = s.client.GetPet(s.ctx, getReq)
 		s.Require().Error(err, "expected pet to be not found")
@@ -199,7 +199,7 @@ func (s *PetServiceIntegrationTestSuite) TestPetLifecycle() {
 }
 
 func (s *PetServiceIntegrationTestSuite) TestUnauthenticatedCallRejection() {
-	req := connect.NewRequest(&petv1.CreatePetRequest{
+	req := connect.NewRequest(&petv2.CreatePetRequest{
 		Name:      "Shadow",
 		Species:   "Cat",
 		BirthDate: "2023-01-01",
@@ -215,17 +215,17 @@ func (s *PetServiceIntegrationTestSuite) TestFilteringAndPagination() {
 	petsToCreate := []struct {
 		name    string
 		species string
-		status  petv1.PetStatus
+		status  petv2.PetStatus
 	}{
-		{"Bella", "Dog", petv1.PetStatus_PET_STATUS_AVAILABLE},
-		{"Max", "Dog", petv1.PetStatus_PET_STATUS_ADOPTED},
-		{"Luna", "Cat", petv1.PetStatus_PET_STATUS_AVAILABLE},
-		{"Charlie", "Cat", petv1.PetStatus_PET_STATUS_PENDING},
-		{"Lucy", "Bird", petv1.PetStatus_PET_STATUS_AVAILABLE},
+		{"Bella", "Dog", petv2.PetStatus_PET_STATUS_AVAILABLE},
+		{"Max", "Dog", petv2.PetStatus_PET_STATUS_ADOPTED},
+		{"Luna", "Cat", petv2.PetStatus_PET_STATUS_AVAILABLE},
+		{"Charlie", "Cat", petv2.PetStatus_PET_STATUS_PENDING},
+		{"Lucy", "Bird", petv2.PetStatus_PET_STATUS_AVAILABLE},
 	}
 
 	for _, p := range petsToCreate {
-		req := connect.NewRequest(&petv1.CreatePetRequest{
+		req := connect.NewRequest(&petv2.CreatePetRequest{
 			Name:      p.name,
 			Species:   p.species,
 			Status:    p.status,
@@ -237,7 +237,7 @@ func (s *PetServiceIntegrationTestSuite) TestFilteringAndPagination() {
 	}
 
 	// Filter by species "Dog"
-	dogReq := connect.NewRequest(&petv1.ListPetsRequest{
+	dogReq := connect.NewRequest(&petv2.ListPetsRequest{
 		Species: "Dog",
 	})
 	dogReq.Header().Set("Authorization", "Bearer test-token")
@@ -247,8 +247,8 @@ func (s *PetServiceIntegrationTestSuite) TestFilteringAndPagination() {
 	s.Len(dogResp.Msg.GetPets(), 2)
 
 	// Filter by status "AVAILABLE"
-	availReq := connect.NewRequest(&petv1.ListPetsRequest{
-		Status: petv1.PetStatus_PET_STATUS_AVAILABLE,
+	availReq := connect.NewRequest(&petv2.ListPetsRequest{
+		Status: petv2.PetStatus_PET_STATUS_AVAILABLE,
 	})
 	availReq.Header().Set("Authorization", "Bearer test-token")
 	availResp, err := s.client.ListPets(s.ctx, availReq)
@@ -260,7 +260,7 @@ func (s *PetServiceIntegrationTestSuite) TestFilteringAndPagination() {
 	var seen []string
 	token := ""
 	for range 5 {
-		req := connect.NewRequest(&petv1.ListPetsRequest{PageSize: 2, PageToken: token})
+		req := connect.NewRequest(&petv2.ListPetsRequest{PageSize: 2, PageToken: token})
 		req.Header().Set("Authorization", "Bearer test-token")
 		resp, listErr := s.client.ListPets(s.ctx, req)
 		s.Require().NoError(listErr)
@@ -279,7 +279,7 @@ func (s *PetServiceIntegrationTestSuite) TestFilteringAndPagination() {
 
 	// The deprecated offset field is refused rather than silently honoured.
 	//nolint:staticcheck // SA1019: sending the deprecated field is the thing under test.
-	pageReq := connect.NewRequest(&petv1.ListPetsRequest{PageSize: 2, Page: 1})
+	pageReq := connect.NewRequest(&petv2.ListPetsRequest{PageSize: 2, Page: 1})
 	pageReq.Header().Set("Authorization", "Bearer test-token")
 	_, pageErr := s.client.ListPets(s.ctx, pageReq)
 	s.Require().Error(pageErr)

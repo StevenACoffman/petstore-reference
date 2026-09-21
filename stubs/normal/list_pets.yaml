@@ -1,6 +1,6 @@
 stubs:
   - id: list-pets
-    target: pet.v1.PetService/ListPets
+    target: pet.v2.PetService/ListPets
     cel_content: |
       {
         'pets': [

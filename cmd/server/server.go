@@ -13,7 +13,7 @@ import (
 	"github.com/rs/cors"
 	"github.com/sudorandom/protojsonx/protojsonxconnect"
 
-	"github.com/example/pets/gen/go/pet/v1/petv1connect"
+	"github.com/example/pets/gen/go/pet/v2/petv2connect"
 	"github.com/example/pets/internal/auth"
 	"github.com/example/pets/internal/authz"
 	"github.com/example/pets/internal/config"
@@ -103,7 +103,7 @@ func addRoutes(
 		validate.NewInterceptor(),
 	)
 
-	petPath, connectHandler := petv1connect.NewPetServiceHandler(
+	petPath, connectHandler := petv2connect.NewPetServiceHandler(
 		pet.NewHandler(pool).WithResilience(resilientDB),
 		connect.WithCodec(&protojsonxconnect.Codec{}),
 		connect.WithInterceptors(interceptors...),
@@ -146,8 +146,8 @@ func handleReadiness(pool *pgxpool.Pool) http.Handler {
 // package directory under `go test`.
 func handleOpenAPISpec() http.Handler {
 	candidates := []string{
-		"gen/openapi/pet/v1/pet.openapi.yaml",
-		"../../gen/openapi/pet/v1/pet.openapi.yaml",
+		"gen/openapi/pet/v2/pet.openapi.yaml",
+		"../../gen/openapi/pet/v2/pet.openapi.yaml",
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, candidate := range candidates {

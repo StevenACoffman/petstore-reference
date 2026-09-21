@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	petv1 "github.com/example/pets/gen/go/pet/v1"
+	petv2 "github.com/example/pets/gen/go/pet/v2"
 	"github.com/example/pets/internal/resilience"
 )
 
@@ -23,10 +23,10 @@ func callWithTimeout(
 	interceptor := resilience.NewTimeoutInterceptor(timeout)
 	handler := interceptor(func(innerCtx context.Context, _ connect.AnyRequest) (connect.AnyResponse, error) {
 		deadline, hasDeadline = innerCtx.Deadline()
-		return connect.NewResponse(&petv1.ListPetsResponse{}), nil
+		return connect.NewResponse(&petv2.ListPetsResponse{}), nil
 	})
 
-	_, err := handler(ctx, connect.NewRequest(&petv1.ListPetsRequest{}))
+	_, err := handler(ctx, connect.NewRequest(&petv2.ListPetsRequest{}))
 	require.NoError(t, err)
 	return deadline, hasDeadline
 }
@@ -88,12 +88,12 @@ func TestRateLimitInterceptorShedsExcess(t *testing.T) {
 	var admitted int
 	handler := interceptor(func(context.Context, connect.AnyRequest) (connect.AnyResponse, error) {
 		admitted++
-		return connect.NewResponse(&petv1.ListPetsResponse{}), nil
+		return connect.NewResponse(&petv2.ListPetsResponse{}), nil
 	})
 
 	var rejected int
 	for range 20 {
-		_, err := handler(t.Context(), connect.NewRequest(&petv1.ListPetsRequest{}))
+		_, err := handler(t.Context(), connect.NewRequest(&petv2.ListPetsRequest{}))
 		if err != nil {
 			assert.Equal(t, connect.CodeResourceExhausted, connect.CodeOf(err))
 			rejected++

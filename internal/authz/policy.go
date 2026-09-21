@@ -31,7 +31,7 @@ type Policy struct {
 
 // NewPolicy builds a Policy from procedure -> roles.
 //
-// Requires: procedures are full Connect paths, e.g. "/pet.v1.PetService/GetPet".
+// Requires: procedures are full Connect paths, e.g. "/pet.v2.PetService/GetPet".
 // Ensures:  the Policy is immutable and safe for concurrent use.
 func NewPolicy(rules map[string][]string) *Policy {
 	allowed := make(map[string]map[string]bool, len(rules))
@@ -81,7 +81,7 @@ func (p *Policy) Procedures() []string {
 // ParseRules reads a policy from its configured form: procedure=role[,role]
 // entries separated by semicolons or newlines.
 //
-//	/pet.v1.PetService/GetPet=viewer,editor; /pet.v1.PetService/DeletePet=editor
+//	/pet.v2.PetService/GetPet=viewer,editor; /pet.v2.PetService/DeletePet=editor
 //
 // A malformed entry is an error rather than a skipped line: silently dropping a
 // rule would either open a procedure that should be closed or close one that

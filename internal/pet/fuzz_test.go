@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	petv1 "github.com/example/pets/gen/go/pet/v1"
+	petv2 "github.com/example/pets/gen/go/pet/v2"
 )
 
 // Fuzz targets for the pure core. Each asserts an invariant rather than a specific
@@ -88,7 +88,7 @@ func FuzzStatusFromDB(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, stored string) {
 		got := statusFromDB(stored)
-		if _, known := petv1.PetStatus_name[int32(got)]; !known {
+		if _, known := petv2.PetStatus_name[int32(got)]; !known {
 			t.Fatalf("statusFromDB(%q) produced %d, which is not a declared enum value", stored, got)
 		}
 	})
@@ -105,11 +105,11 @@ func FuzzNewPetInput(f *testing.F) {
 	f.Add("Rex", "dog", "", int32(0))
 
 	f.Fuzz(func(t *testing.T, name, species, birthDate string, status int32) {
-		msg := &petv1.CreatePetRequest{
+		msg := &petv2.CreatePetRequest{
 			Name:      name,
 			Species:   species,
 			BirthDate: birthDate,
-			Status:    petv1.PetStatus(status),
+			Status:    petv2.PetStatus(status),
 		}
 
 		in, err := newPetInput(msg)
@@ -133,7 +133,7 @@ func FuzzNewPetInput(f *testing.F) {
 		if !in.BirthDate.Valid && strings.TrimSpace(birthDate) != "" {
 			t.Fatalf("newPetInput dropped a supplied birth date %q", birthDate)
 		}
-		if in.Status == petv1.PetStatus_PET_STATUS_UNSPECIFIED.String() {
+		if in.Status == petv2.PetStatus_PET_STATUS_UNSPECIFIED.String() {
 			t.Fatal("newPetInput left the status unspecified")
 		}
 		if !utf8.ValidString(in.Name) && utf8.ValidString(name) {

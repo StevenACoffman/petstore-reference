@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	petv1 "github.com/example/pets/gen/go/pet/v1"
+	petv2 "github.com/example/pets/gen/go/pet/v2"
 	"github.com/example/pets/internal/auth"
 )
 
@@ -23,7 +23,7 @@ func TestListPetsRejectsTheDeprecatedPageField(t *testing.T) {
 
 	handler := NewHandler(nil)
 	//nolint:staticcheck // SA1019: sending the deprecated field is the thing under test.
-	req := connect.NewRequest(&petv1.ListPetsRequest{PageSize: 10, Page: 1})
+	req := connect.NewRequest(&petv2.ListPetsRequest{PageSize: 10, Page: 1})
 
 	_, err := handler.ListPets(context.Background(), req)
 
@@ -36,7 +36,7 @@ func TestListPetsRejectsAMalformedPageToken(t *testing.T) {
 	t.Parallel()
 
 	handler := NewHandler(nil)
-	req := connect.NewRequest(&petv1.ListPetsRequest{PageToken: "not-a-token"})
+	req := connect.NewRequest(&petv2.ListPetsRequest{PageToken: "not-a-token"})
 
 	_, err := handler.ListPets(context.Background(), req)
 
@@ -53,15 +53,15 @@ func TestHandlerRejectsMalformedUUIDs(t *testing.T) {
 
 	cases := map[string]func() error{
 		"GetPet": func() error {
-			_, err := handler.GetPet(ctx, connect.NewRequest(&petv1.GetPetRequest{Id: "not-a-uuid"}))
+			_, err := handler.GetPet(ctx, connect.NewRequest(&petv2.GetPetRequest{Id: "not-a-uuid"}))
 			return err
 		},
 		"UpdatePet": func() error {
-			_, err := handler.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{Id: "not-a-uuid"}))
+			_, err := handler.UpdatePet(ctx, connect.NewRequest(&petv2.UpdatePetRequest{Id: "not-a-uuid"}))
 			return err
 		},
 		"DeletePet": func() error {
-			_, err := handler.DeletePet(ctx, connect.NewRequest(&petv1.DeletePetRequest{Id: "not-a-uuid"}))
+			_, err := handler.DeletePet(ctx, connect.NewRequest(&petv2.DeletePetRequest{Id: "not-a-uuid"}))
 			return err
 		},
 	}
@@ -90,27 +90,27 @@ func TestHandlerWithoutADatabase(t *testing.T) {
 
 	cases := map[string]func() error{
 		"GetPet": func() error {
-			_, err := h.GetPet(ctx, connect.NewRequest(&petv1.GetPetRequest{Id: validUUID}))
+			_, err := h.GetPet(ctx, connect.NewRequest(&petv2.GetPetRequest{Id: validUUID}))
 			return err
 		},
 		"ListPets": func() error {
-			_, err := h.ListPets(ctx, connect.NewRequest(&petv1.ListPetsRequest{}))
+			_, err := h.ListPets(ctx, connect.NewRequest(&petv2.ListPetsRequest{}))
 			return err
 		},
 		"CreatePet": func() error {
-			_, err := h.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+			_, err := h.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 				Name: "Rex", Species: "dog",
 			}))
 			return err
 		},
 		"UpdatePet": func() error {
-			_, err := h.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
+			_, err := h.UpdatePet(ctx, connect.NewRequest(&petv2.UpdatePetRequest{
 				Id: validUUID, Name: new("Rex"), Species: new("dog"),
 			}))
 			return err
 		},
 		"DeletePet": func() error {
-			_, err := h.DeletePet(ctx, connect.NewRequest(&petv1.DeletePetRequest{Id: validUUID}))
+			_, err := h.DeletePet(ctx, connect.NewRequest(&petv2.DeletePetRequest{Id: validUUID}))
 			return err
 		},
 	}

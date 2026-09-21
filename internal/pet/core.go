@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	petv1 "github.com/example/pets/gen/go/pet/v1"
+	petv2 "github.com/example/pets/gen/go/pet/v2"
 	"github.com/example/pets/internal/db"
 )
 
@@ -48,7 +48,7 @@ type petInput struct {
 //
 // Ensures: on success Name and Species are trimmed and non-empty, the slices are
 // non-nil, and Status is concrete. Failures wrap errInvalid and name the field.
-func newPetInput(msg *petv1.CreatePetRequest) (petInput, error) {
+func newPetInput(msg *petv2.CreatePetRequest) (petInput, error) {
 	name := strings.TrimSpace(msg.GetName())
 	species := strings.TrimSpace(msg.GetSpecies())
 	if name == "" || species == "" {
@@ -61,8 +61,8 @@ func newPetInput(msg *petv1.CreatePetRequest) (petInput, error) {
 	}
 
 	status := msg.GetStatus()
-	if status == petv1.PetStatus_PET_STATUS_UNSPECIFIED {
-		status = petv1.PetStatus_PET_STATUS_AVAILABLE
+	if status == petv2.PetStatus_PET_STATUS_UNSPECIFIED {
+		status = petv2.PetStatus_PET_STATUS_AVAILABLE
 	}
 
 	// Nil slices are normalised to empty so they encode as [] rather than null, and
@@ -126,22 +126,22 @@ func clampToInt32(v int64) int32 {
 // statusFromDB maps a stored status onto the enum, with or without the
 // PET_STATUS_ prefix. An unrecognised value maps to UNSPECIFIED rather than
 // failing: a reader should not error on a value a newer writer introduced.
-func statusFromDB(stored string) petv1.PetStatus {
+func statusFromDB(stored string) petv2.PetStatus {
 	name := stored
 	if !strings.HasPrefix(name, statusPrefix) {
 		name = statusPrefix + name
 	}
-	return petv1.PetStatus(petv1.PetStatus_value[name])
+	return petv2.PetStatus(petv2.PetStatus_value[name])
 }
 
 // toProtoPet renders a stored pet into the wire type.
-func toProtoPet(p db.Pet) *petv1.Pet {
+func toProtoPet(p db.Pet) *petv2.Pet {
 	var birthDate string
 	if p.BirthDate.Valid {
 		birthDate = p.BirthDate.Time.Format(birthDateLayout)
 	}
 
-	protoPet := &petv1.Pet{
+	protoPet := &petv2.Pet{
 		Id:                 uuid.UUID(p.ID.Bytes).String(),
 		Name:               p.Name,
 		Species:            p.Species,
@@ -181,7 +181,7 @@ var updatePaths = map[string]bool{
 // An unspecified status always means "leave alone": a zero enum cannot be told
 // from an unsent one, and resetting an adopted pet to available is never intended.
 func newUpdateParams(
-	msg *petv1.UpdatePetRequest, id pgtype.UUID, modifiedBy string,
+	msg *petv2.UpdatePetRequest, id pgtype.UUID, modifiedBy string,
 ) (db.UpdatePetParams, error) {
 	params := db.UpdatePetParams{ID: id, ModifiedBy: modifiedBy}
 
@@ -232,7 +232,7 @@ func newUpdateParams(
 		params.BirthDateEstimated = pgtype.Bool{Bool: msg.GetBirthDateEstimated(), Valid: true}
 	}
 	// An unspecified status is always "leave it", never "reset to available".
-	if writes("status", true) && msg.GetStatus() != petv1.PetStatus_PET_STATUS_UNSPECIFIED {
+	if writes("status", true) && msg.GetStatus() != petv2.PetStatus_PET_STATUS_UNSPECIFIED {
 		params.Status = pgtype.Text{String: msg.GetStatus().String(), Valid: true}
 	}
 	if writes("photo_urls", msg.GetPhotoUrls() != nil) {

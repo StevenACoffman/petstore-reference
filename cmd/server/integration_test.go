@@ -130,7 +130,7 @@ func TestRunServesEndToEnd(t *testing.T) {
 	// an admin. This asserts that `just run` works with no AUTHZ_POLICY configured.
 	// Verified non-vacuous: with DEV_ROLES=user it fails with permission_denied.
 	t.Run("an RPC succeeds in dev with no policy configured", func(t *testing.T) {
-		body, status := post(ctx, t, baseURL+"/pet.v1.PetService/ListPets", `{}`)
+		body, status := post(ctx, t, baseURL+"/pet.v2.PetService/ListPets", `{}`)
 		assert.Equal(t, http.StatusOK, status, "body: %s", body)
 	})
 

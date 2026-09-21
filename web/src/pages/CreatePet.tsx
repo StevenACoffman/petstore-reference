@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation } from '@connectrpc/connect-query';
 import { useQueryClient } from '@tanstack/react-query';
-import { PetService, PetStatus } from '../gen/pet/v1/pet_pb';
+import { PetService, PetStatus } from '../gen/pet/v2/pet_pb';
 import { Layout } from '../components/Layout';
 import { PetFormFields } from '../components/PetFormFields';
 import { errorMessage } from '../lib/errors';

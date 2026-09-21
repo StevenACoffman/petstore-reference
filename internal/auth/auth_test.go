@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	petv1 "github.com/example/pets/gen/go/pet/v1"
-	"github.com/example/pets/gen/go/pet/v1/petv1connect"
+	petv2 "github.com/example/pets/gen/go/pet/v2"
+	"github.com/example/pets/gen/go/pet/v2/petv2connect"
 	"github.com/example/pets/internal/auth"
 )
 
@@ -20,7 +20,7 @@ import (
 // matters because the handler writes from the server goroutine while the test reads
 // from its own.
 type mockPetService struct {
-	petv1connect.UnimplementedPetServiceHandler
+	petv2connect.UnimplementedPetServiceHandler
 
 	mu         sync.Mutex
 	lastClaims *auth.Claims
@@ -33,32 +33,32 @@ func (m *mockPetService) claims() *auth.Claims {
 	return m.lastClaims
 }
 
-func (m *mockPetService) GetPet(ctx context.Context, req *connect.Request[petv1.GetPetRequest]) (*connect.Response[petv1.GetPetResponse], error) {
+func (m *mockPetService) GetPet(ctx context.Context, req *connect.Request[petv2.GetPetRequest]) (*connect.Response[petv2.GetPetResponse], error) {
 	if claims, ok := auth.FromContext(ctx); ok {
 		m.mu.Lock()
 		m.lastClaims = claims
 		m.mu.Unlock()
 	}
-	return connect.NewResponse(&petv1.GetPetResponse{
-		Pet: &petv1.Pet{
+	return connect.NewResponse(&petv2.GetPetResponse{
+		Pet: &petv2.Pet{
 			Id:   req.Msg.GetId(),
 			Name: "TestPet",
 		},
 	}), nil
 }
 
-func (m *mockPetService) ListPets(_ context.Context, _ *connect.Request[petv1.ListPetsRequest]) (*connect.Response[petv1.ListPetsResponse], error) {
-	return connect.NewResponse(&petv1.ListPetsResponse{}), nil
+func (m *mockPetService) ListPets(_ context.Context, _ *connect.Request[petv2.ListPetsRequest]) (*connect.Response[petv2.ListPetsResponse], error) {
+	return connect.NewResponse(&petv2.ListPetsResponse{}), nil
 }
 
 // newAuthTestServer stands up a PetService behind cfg and returns a client and the
 // mock it talks to. Each call gets its own server and its own mock, so cases share
 // nothing and may run in parallel.
-func newAuthTestServer(t *testing.T, cfg auth.Config) (petv1connect.PetServiceClient, *mockPetService) {
+func newAuthTestServer(t *testing.T, cfg auth.Config) (petv2connect.PetServiceClient, *mockPetService) {
 	t.Helper()
 
 	svc := &mockPetService{}
-	path, handler := petv1connect.NewPetServiceHandler(
+	path, handler := petv2connect.NewPetServiceHandler(
 		svc,
 		connect.WithInterceptors(auth.NewInterceptor(cfg)),
 	)
@@ -67,7 +67,7 @@ func newAuthTestServer(t *testing.T, cfg auth.Config) (petv1connect.PetServiceCl
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
-	return petv1connect.NewPetServiceClient(server.Client(), server.URL), svc
+	return petv2connect.NewPetServiceClient(server.Client(), server.URL), svc
 }
 
 func TestAuthInterceptor(t *testing.T) {
@@ -82,7 +82,7 @@ func TestAuthInterceptor(t *testing.T) {
 		StaticTokens:      []string{"valid-token-123"},
 		TrustProxyHeaders: true,
 		SkipProcedures: map[string]bool{
-			petv1connect.PetServiceListPetsProcedure: true,
+			petv2connect.PetServiceListPetsProcedure: true,
 		},
 	}
 	// validatorConfig delegates to a custom verifier, as a real IAP deployment would.
@@ -168,14 +168,14 @@ func TestAuthInterceptor(t *testing.T) {
 			ctx := t.Context()
 
 			if tc.callListPets {
-				req := connect.NewRequest(&petv1.ListPetsRequest{})
+				req := connect.NewRequest(&petv2.ListPetsRequest{})
 				resp, err := client.ListPets(ctx, req)
 				require.NoError(t, err)
 				assert.NotNil(t, resp.Msg)
 				return
 			}
 
-			req := connect.NewRequest(&petv1.GetPetRequest{Id: petID})
+			req := connect.NewRequest(&petv2.GetPetRequest{Id: petID})
 			for k, v := range tc.headers {
 				req.Header().Set(k, v)
 			}
@@ -207,7 +207,7 @@ func TestAuthInterceptorRejectsUntrustedProxyHeaders(t *testing.T) {
 	t.Parallel()
 
 	svc := &mockPetService{}
-	path, handler := petv1connect.NewPetServiceHandler(
+	path, handler := petv2connect.NewPetServiceHandler(
 		svc,
 		connect.WithInterceptors(auth.NewInterceptor(auth.Config{Enabled: true})),
 	)
@@ -216,8 +216,8 @@ func TestAuthInterceptorRejectsUntrustedProxyHeaders(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	client := petv1connect.NewPetServiceClient(server.Client(), server.URL)
-	req := connect.NewRequest(&petv1.GetPetRequest{Id: "123e4567-e89b-12d3-a456-426614174000"})
+	client := petv2connect.NewPetServiceClient(server.Client(), server.URL)
+	req := connect.NewRequest(&petv2.GetPetRequest{Id: "123e4567-e89b-12d3-a456-426614174000"})
 	req.Header().Set("X-Forwarded-Email", "attacker@example.com")
 	req.Header().Set("X-Forwarded-User", "attacker")
 
@@ -345,7 +345,7 @@ func TestDevIdentityCarriesRoles(t *testing.T) {
 				}),
 			).ServeHTTP(recorder, injected)
 
-			req := connect.NewRequest(&petv1.GetPetRequest{Id: "123e4567-e89b-12d3-a456-426614174000"})
+			req := connect.NewRequest(&petv2.GetPetRequest{Id: "123e4567-e89b-12d3-a456-426614174000"})
 			for _, h := range []string{"X-Forwarded-Email", "X-Forwarded-User", "X-Forwarded-Groups"} {
 				req.Header().Set(h, injected.Header.Get(h))
 			}

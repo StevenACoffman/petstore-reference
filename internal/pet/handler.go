@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	petv1 "github.com/example/pets/gen/go/pet/v1"
-	"github.com/example/pets/gen/go/pet/v1/petv1connect"
+	petv2 "github.com/example/pets/gen/go/pet/v2"
+	"github.com/example/pets/gen/go/pet/v2/petv2connect"
 	"github.com/example/pets/internal/auth"
 	"github.com/example/pets/internal/db"
 	"github.com/example/pets/internal/resilience"
@@ -26,7 +26,7 @@ type Handler struct {
 	resilientDB *resilience.DB
 }
 
-var _ petv1connect.PetServiceHandler = (*Handler)(nil)
+var _ petv2connect.PetServiceHandler = (*Handler)(nil)
 
 // NewHandler builds a Handler over the given pool.
 //
@@ -90,8 +90,8 @@ func callerEmail(ctx context.Context) (string, error) {
 }
 
 func (h *Handler) CreatePet(
-	ctx context.Context, req *connect.Request[petv1.CreatePetRequest],
-) (*connect.Response[petv1.CreatePetResponse], error) {
+	ctx context.Context, req *connect.Request[petv2.CreatePetRequest],
+) (*connect.Response[petv2.CreatePetResponse], error) {
 	const op = "Handler.CreatePet"
 
 	input, err := newPetInput(req.Msg)
@@ -120,12 +120,12 @@ func (h *Handler) CreatePet(
 		return nil, translate(ctx, op, err)
 	}
 
-	return connect.NewResponse(&petv1.CreatePetResponse{Pet: toProtoPet(created)}), nil
+	return connect.NewResponse(&petv2.CreatePetResponse{Pet: toProtoPet(created)}), nil
 }
 
 func (h *Handler) GetPet(
-	ctx context.Context, req *connect.Request[petv1.GetPetRequest],
-) (*connect.Response[petv1.GetPetResponse], error) {
+	ctx context.Context, req *connect.Request[petv2.GetPetRequest],
+) (*connect.Response[petv2.GetPetResponse], error) {
 	const op = "Handler.GetPet"
 
 	uid, err := parseUUID("id", req.Msg.GetId())
@@ -139,12 +139,12 @@ func (h *Handler) GetPet(
 	if err != nil {
 		return nil, translate(ctx, op, err)
 	}
-	return connect.NewResponse(&petv1.GetPetResponse{Pet: toProtoPet(item)}), nil
+	return connect.NewResponse(&petv2.GetPetResponse{Pet: toProtoPet(item)}), nil
 }
 
 func (h *Handler) ListPets(
-	ctx context.Context, req *connect.Request[petv1.ListPetsRequest],
-) (*connect.Response[petv1.ListPetsResponse], error) {
+	ctx context.Context, req *connect.Request[petv2.ListPetsRequest],
+) (*connect.Response[petv2.ListPetsResponse], error) {
 	const op = "Handler.ListPets"
 	msg := req.Msg
 
@@ -155,7 +155,7 @@ func (h *Handler) ListPets(
 	}
 
 	var statusParam pgtype.Text
-	if msg.GetStatus() != petv1.PetStatus_PET_STATUS_UNSPECIFIED {
+	if msg.GetStatus() != petv2.PetStatus_PET_STATUS_UNSPECIFIED {
 		statusParam = pgtype.Text{String: msg.GetStatus().String(), Valid: true}
 	}
 	var speciesParam pgtype.Text
@@ -180,7 +180,7 @@ func (h *Handler) ListPets(
 	}
 
 	page, token := splitPage(rows, limit)
-	protoPets := make([]*petv1.Pet, len(page))
+	protoPets := make([]*petv2.Pet, len(page))
 	for i := range page {
 		protoPets[i] = toProtoPet(petFromListRow(page[i]))
 	}
@@ -190,7 +190,7 @@ func (h *Handler) ListPets(
 		total = page[0].TotalCount
 	}
 
-	return connect.NewResponse(&petv1.ListPetsResponse{
+	return connect.NewResponse(&petv2.ListPetsResponse{
 		Pets:          protoPets,
 		TotalCount:    clampToInt32(total),
 		NextPageToken: token,
@@ -198,8 +198,8 @@ func (h *Handler) ListPets(
 }
 
 func (h *Handler) UpdatePet(
-	ctx context.Context, req *connect.Request[petv1.UpdatePetRequest],
-) (*connect.Response[petv1.UpdatePetResponse], error) {
+	ctx context.Context, req *connect.Request[petv2.UpdatePetRequest],
+) (*connect.Response[petv2.UpdatePetResponse], error) {
 	const op = "Handler.UpdatePet"
 
 	uid, err := parseUUID("id", req.Msg.GetId())
@@ -222,12 +222,12 @@ func (h *Handler) UpdatePet(
 		return nil, translate(ctx, op, err)
 	}
 
-	return connect.NewResponse(&petv1.UpdatePetResponse{Pet: toProtoPet(updated)}), nil
+	return connect.NewResponse(&petv2.UpdatePetResponse{Pet: toProtoPet(updated)}), nil
 }
 
 func (h *Handler) DeletePet(
-	ctx context.Context, req *connect.Request[petv1.DeletePetRequest],
-) (*connect.Response[petv1.DeletePetResponse], error) {
+	ctx context.Context, req *connect.Request[petv2.DeletePetRequest],
+) (*connect.Response[petv2.DeletePetResponse], error) {
 	const op = "Handler.DeletePet"
 
 	uid, err := parseUUID("id", req.Msg.GetId())
@@ -245,5 +245,5 @@ func (h *Handler) DeletePet(
 		return nil, connect.NewError(connect.CodeNotFound, errNotFound)
 	}
 
-	return connect.NewResponse(&petv1.DeletePetResponse{Success: true}), nil
+	return connect.NewResponse(&petv2.DeletePetResponse{Success: true}), nil
 }

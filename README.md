@@ -48,7 +48,8 @@ This was put together [by request](https://github.com/sudorandom/kmcd.dev/issues
 │   ├── telemetry/          # OpenTelemetry TracerProvider & Connect interceptor setup
 │   └── testutil/           # PostgreSQL Testcontainers helper with Goose migrations & TRUNCATE
 ├── proto/
-│   └── pet/v1/pet.proto    # Protobuf schema with validation rules
+│   ├── pet/v2/pet.proto    # Protobuf schema with validation rules
+│   └── pet/v1/pet.proto    # withdrawn; retained for buf compatibility
 ├── gen/                    # Generated Go stubs, OpenAPI specs, and binary descriptor images
 ├── sql/
 │   ├── schema/             # Versioned Goose migrations
@@ -145,7 +146,7 @@ The service will be listening on `https://localhost:8080` (TLS enabled via `mkce
 - **Liveness:** `/healthz` — the process is up. Touches no dependency, so a database
   blip never gets a healthy pod killed.
 - **Readiness:** `/readyz` — PostgreSQL is reachable. Poll this one from a balancer.
-- **Connect Service:** `https://localhost:8080/pet.v1.PetService/`
+- **Connect Service:** `https://localhost:8080/pet.v2.PetService/`
 
 Operational endpoints are served on a **separate admin listener**, bound to loopback
 (`127.0.0.1:9090`) by default, so profiling data is never exposed publicly:
@@ -299,11 +300,11 @@ The model is the conventional petstore one: a declarative role × action matrix,
 
 ```bash
 AUTHZ_POLICY="
-/pet.v1.PetService/ListPets=viewer,editor
-/pet.v1.PetService/GetPet=viewer,editor
-/pet.v1.PetService/CreatePet=editor
-/pet.v1.PetService/UpdatePet=editor
-/pet.v1.PetService/DeletePet=editor
+/pet.v2.PetService/ListPets=viewer,editor
+/pet.v2.PetService/GetPet=viewer,editor
+/pet.v2.PetService/CreatePet=editor
+/pet.v2.PetService/UpdatePet=editor
+/pet.v2.PetService/DeletePet=editor
 "
 ```
 

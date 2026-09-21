@@ -17,7 +17,7 @@ func TestCORS_PreflightWithCredentials(t *testing.T) {
 
 	c := cors.New(corsOptions(&config.Config{AllowedOrigins: []string{"https://localhost:4321"}}))
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodOptions, "/pet.v1.PetService/ListPets", http.NoBody)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodOptions, "/pet.v2.PetService/ListPets", http.NoBody)
 	req.Header.Set("Origin", "https://localhost:4321")
 	req.Header.Set("Access-Control-Request-Method", "POST")
 	req.Header.Set("Access-Control-Request-Headers", "connect-protocol-version,content-type")
@@ -36,7 +36,7 @@ func TestCORS_RejectsUnconfiguredOrigin(t *testing.T) {
 	t.Parallel()
 
 	c := cors.New(corsOptions(&config.Config{AllowedOrigins: []string{"https://app.example.com"}}))
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodOptions, "/pet.v1.PetService/ListPets", http.NoBody)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodOptions, "/pet.v2.PetService/ListPets", http.NoBody)
 	req.Header.Set("Origin", "https://evil.example.com")
 	req.Header.Set("Access-Control-Request-Method", "POST")
 	req.Header.Set("Access-Control-Request-Headers", "Content-Type")

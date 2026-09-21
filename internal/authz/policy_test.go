@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	getPet    = "/pet.v1.PetService/GetPet"
-	deletePet = "/pet.v1.PetService/DeletePet"
+	getPet    = "/pet.v2.PetService/GetPet"
+	deletePet = "/pet.v2.PetService/DeletePet"
 )
 
 func TestPolicyAllows(t *testing.T) {
@@ -32,8 +32,8 @@ func TestPolicyAllows(t *testing.T) {
 		"an unlisted role is denied":                 {getPet, []string{"guest"}, false},
 		"a role listed elsewhere is denied here":     {deletePet, []string{"viewer"}, false},
 		"admin bypasses the matrix":                  {deletePet, []string{"admin"}, true},
-		"admin bypasses an unlisted procedure too":   {"/pet.v1.PetService/Unlisted", []string{"admin"}, true},
-		"an unlisted procedure is denied by default": {"/pet.v1.PetService/Unlisted", []string{"editor"}, false},
+		"admin bypasses an unlisted procedure too":   {"/pet.v2.PetService/Unlisted", []string{"admin"}, true},
+		"an unlisted procedure is denied by default": {"/pet.v2.PetService/Unlisted", []string{"editor"}, false},
 		"no roles at all is denied":                  {getPet, nil, false},
 		"an empty role string does not match":        {getPet, []string{""}, false},
 	}
@@ -124,7 +124,7 @@ func TestParseRulesRejectsMalformed(t *testing.T) {
 		"no procedure":          "=viewer",
 		"no roles":              getPet + "=",
 		"only blank roles":      getPet + "= , ",
-		"procedure without a /": "pet.v1.PetService/GetPet=viewer",
+		"procedure without a /": "pet.v2.PetService/GetPet=viewer",
 	}
 
 	for name, spec := range cases {

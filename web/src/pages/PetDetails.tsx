@@ -2,7 +2,7 @@ import React from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@connectrpc/connect-query';
 import { useQueryClient } from '@tanstack/react-query';
-import { PetService } from '../gen/pet/v1/pet_pb';
+import { PetService } from '../gen/pet/v2/pet_pb';
 import { Layout } from '../components/Layout';
 import { PetImage } from '../components/PetImage';
 import { formatTimestamp, formatBirthDate, calculateAge } from '../lib/date';

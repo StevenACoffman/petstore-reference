@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	petv1 "github.com/example/pets/gen/go/pet/v1"
+	petv2 "github.com/example/pets/gen/go/pet/v2"
 	"github.com/example/pets/internal/db"
 )
 
@@ -21,12 +21,12 @@ func TestNewPetInput(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]struct {
-		msg     *petv1.CreatePetRequest
+		msg     *petv2.CreatePetRequest
 		wantErr bool
 		assert  func(t *testing.T, in petInput)
 	}{
 		"trims surrounding whitespace": {
-			msg: &petv1.CreatePetRequest{
+			msg: &petv2.CreatePetRequest{
 				Name: "  Rex  ", Species: "  dog  ", BirthDate: "2020-01-02",
 			},
 			assert: func(t *testing.T, in petInput) {
@@ -36,14 +36,14 @@ func TestNewPetInput(t *testing.T) {
 			},
 		},
 		"defaults an unspecified status to available": {
-			msg: &petv1.CreatePetRequest{Name: "Rex", Species: "dog", BirthDate: "2020-01-02"},
+			msg: &petv2.CreatePetRequest{Name: "Rex", Species: "dog", BirthDate: "2020-01-02"},
 			assert: func(t *testing.T, in petInput) {
 				t.Helper()
-				assert.Equal(t, petv1.PetStatus_PET_STATUS_AVAILABLE.String(), in.Status)
+				assert.Equal(t, petv2.PetStatus_PET_STATUS_AVAILABLE.String(), in.Status)
 			},
 		},
 		"carries the birth-date-estimated flag": {
-			msg: &petv1.CreatePetRequest{
+			msg: &petv2.CreatePetRequest{
 				Name: "Rex", Species: "dog", BirthDate: "2020-01-02",
 				BirthDateEstimated: true,
 			},
@@ -53,14 +53,14 @@ func TestNewPetInput(t *testing.T) {
 			},
 		},
 		"leaves the birth-date-estimated flag false when unset": {
-			msg: &petv1.CreatePetRequest{Name: "Rex", Species: "dog", BirthDate: "2020-01-02"},
+			msg: &petv2.CreatePetRequest{Name: "Rex", Species: "dog", BirthDate: "2020-01-02"},
 			assert: func(t *testing.T, in petInput) {
 				t.Helper()
 				assert.False(t, in.BirthDateEstimated)
 			},
 		},
 		"carries photo urls through": {
-			msg: &petv1.CreatePetRequest{
+			msg: &petv2.CreatePetRequest{
 				Name: "Rex", Species: "dog", BirthDate: "2020-01-02",
 				PhotoUrls: []string{"https://example.com/a.jpg"},
 			},
@@ -70,7 +70,7 @@ func TestNewPetInput(t *testing.T) {
 			},
 		},
 		"turns nil photo urls into an empty slice": {
-			msg: &petv1.CreatePetRequest{Name: "Rex", Species: "dog", BirthDate: "2020-01-02"},
+			msg: &petv2.CreatePetRequest{Name: "Rex", Species: "dog", BirthDate: "2020-01-02"},
 			assert: func(t *testing.T, in petInput) {
 				t.Helper()
 				assert.NotNil(t, in.PhotoUrls)
@@ -78,17 +78,17 @@ func TestNewPetInput(t *testing.T) {
 			},
 		},
 		"keeps an explicit status": {
-			msg: &petv1.CreatePetRequest{
+			msg: &petv2.CreatePetRequest{
 				Name: "Rex", Species: "dog", BirthDate: "2020-01-02",
-				Status: petv1.PetStatus_PET_STATUS_ADOPTED,
+				Status: petv2.PetStatus_PET_STATUS_ADOPTED,
 			},
 			assert: func(t *testing.T, in petInput) {
 				t.Helper()
-				assert.Equal(t, petv1.PetStatus_PET_STATUS_ADOPTED.String(), in.Status)
+				assert.Equal(t, petv2.PetStatus_PET_STATUS_ADOPTED.String(), in.Status)
 			},
 		},
 		"turns nil tags into an empty slice so they encode as []": {
-			msg: &petv1.CreatePetRequest{Name: "Rex", Species: "dog", BirthDate: "2020-01-02"},
+			msg: &petv2.CreatePetRequest{Name: "Rex", Species: "dog", BirthDate: "2020-01-02"},
 			assert: func(t *testing.T, in petInput) {
 				t.Helper()
 				assert.NotNil(t, in.Tags)
@@ -96,15 +96,15 @@ func TestNewPetInput(t *testing.T) {
 			},
 		},
 		"rejects a blank name": {
-			msg:     &petv1.CreatePetRequest{Name: "   ", Species: "dog", BirthDate: "2020-01-02"},
+			msg:     &petv2.CreatePetRequest{Name: "   ", Species: "dog", BirthDate: "2020-01-02"},
 			wantErr: true,
 		},
 		"rejects a blank species": {
-			msg:     &petv1.CreatePetRequest{Name: "Rex", Species: "", BirthDate: "2020-01-02"},
+			msg:     &petv2.CreatePetRequest{Name: "Rex", Species: "", BirthDate: "2020-01-02"},
 			wantErr: true,
 		},
 		"rejects a malformed birth date": {
-			msg:     &petv1.CreatePetRequest{Name: "Rex", Species: "dog", BirthDate: "02/01/2020"},
+			msg:     &petv2.CreatePetRequest{Name: "Rex", Species: "dog", BirthDate: "02/01/2020"},
 			wantErr: true,
 		},
 	}
@@ -213,15 +213,15 @@ func TestClampToInt32(t *testing.T) {
 func TestStatusFromDB(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]petv1.PetStatus{
-		"AVAILABLE":            petv1.PetStatus_PET_STATUS_AVAILABLE,
-		"PET_STATUS_AVAILABLE": petv1.PetStatus_PET_STATUS_AVAILABLE,
-		"PENDING":              petv1.PetStatus_PET_STATUS_PENDING,
-		"PET_STATUS_PENDING":   petv1.PetStatus_PET_STATUS_PENDING,
-		"ADOPTED":              petv1.PetStatus_PET_STATUS_ADOPTED,
-		"PET_STATUS_ADOPTED":   petv1.PetStatus_PET_STATUS_ADOPTED,
-		"UNKNOWN_STATUS":       petv1.PetStatus_PET_STATUS_UNSPECIFIED,
-		"":                     petv1.PetStatus_PET_STATUS_UNSPECIFIED,
+	cases := map[string]petv2.PetStatus{
+		"AVAILABLE":            petv2.PetStatus_PET_STATUS_AVAILABLE,
+		"PET_STATUS_AVAILABLE": petv2.PetStatus_PET_STATUS_AVAILABLE,
+		"PENDING":              petv2.PetStatus_PET_STATUS_PENDING,
+		"PET_STATUS_PENDING":   petv2.PetStatus_PET_STATUS_PENDING,
+		"ADOPTED":              petv2.PetStatus_PET_STATUS_ADOPTED,
+		"PET_STATUS_ADOPTED":   petv2.PetStatus_PET_STATUS_ADOPTED,
+		"UNKNOWN_STATUS":       petv2.PetStatus_PET_STATUS_UNSPECIFIED,
+		"":                     petv2.PetStatus_PET_STATUS_UNSPECIFIED,
 	}
 
 	for stored, want := range cases {
@@ -260,7 +260,7 @@ func TestToProtoPet(t *testing.T) {
 	assert.Equal(t, "dog", got.GetSpecies())
 	assert.Equal(t, "2020-01-02", got.GetBirthDate())
 	assert.True(t, got.GetBirthDateEstimated())
-	assert.Equal(t, petv1.PetStatus_PET_STATUS_AVAILABLE, got.GetStatus())
+	assert.Equal(t, petv2.PetStatus_PET_STATUS_AVAILABLE, got.GetStatus())
 	assert.Equal(t, []string{"good-boy"}, got.GetTags())
 	assert.Equal(t, "alice@example.com", got.GetCreatedBy())
 	assert.Equal(t, "bob@example.com", got.GetModifiedBy())

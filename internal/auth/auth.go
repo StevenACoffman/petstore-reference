@@ -98,7 +98,7 @@ type Config struct {
 	// StaticTokens is an optional list of valid bearer tokens (e.g. for service-to-service or CLI).
 	StaticTokens []string
 
-	// SkipProcedures is a set of RPC procedures that bypass authentication (e.g. "/pet.v1.PetService/GetPet").
+	// SkipProcedures is a set of RPC procedures that bypass authentication (e.g. "/pet.v2.PetService/GetPet").
 	SkipProcedures map[string]bool
 
 	// Validator is an optional custom token/JWT validator (e.g. for verifying Google IAP JWT assertion).

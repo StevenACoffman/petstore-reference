@@ -272,9 +272,6 @@ components:
           description: Deserialized error detail payload. The 'type' field indicates the schema. This field is for easier debugging and should not be relied upon for application logic.
       additionalProperties: true
       description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message, with an additional debug field for ConnectRPC error details.
-    google.protobuf.FieldMask:
-      type: string
-      description: Comma-separated field paths in lowerCamelCase (for example, `user.displayName,photo`).
     google.protobuf.Timestamp:
       type: string
       examples:
@@ -387,16 +384,7 @@ components:
           title: page
           minimum: 0
           format: int32
-          description: |-
-            Deprecated: offset paging skipped rows inserted between fetches and served
-             others twice. Sending a non-zero value is rejected; use page_token.
-          deprecated: true
-        pageToken:
-          type: string
-          title: page_token
-          description: |-
-            Opaque token from a previous response's next_page_token. Empty starts at the
-             first page.
+          description: Page token / offset
       title: ListPetsRequest
       additionalProperties: false
     pet.v1.ListPetsResponse:
@@ -411,11 +399,6 @@ components:
           type: integer
           title: total_count
           format: int32
-          description: Pets matching the filters, ignoring the page token.
-        nextPageToken:
-          type: string
-          title: next_page_token
-          description: Token for the next page; empty when this is the last one.
       title: ListPetsResponse
       additionalProperties: false
     pet.v1.Pet:
@@ -489,29 +472,22 @@ components:
           title: id
           format: uuid
         name:
-          type:
-            - string
-            - "null"
+          type: string
           title: name
           maxLength: 100
           minLength: 1
         species:
-          type:
-            - string
-            - "null"
+          type: string
           title: species
           maxLength: 50
           minLength: 1
         birthDate:
-          type:
-            - string
-            - "null"
+          type: string
           title: birth_date
           pattern: ^(\d{4}-\d{2}-\d{2})?$
         status:
-          oneOf:
+          allOf:
             - $ref: '#/components/schemas/pet.v1.PetStatus'
-            - type: "null"
           title: status
         photoUrls:
           type: array
@@ -525,36 +501,10 @@ components:
             type: string
           title: tags
         birthDateEstimated:
-          type:
-            - boolean
-            - "null"
+          type: boolean
           title: birth_date_estimated
-        updateMask:
-          allOf:
-            - $ref: '#/components/schemas/google.protobuf.FieldMask'
-          title: update_mask
-          description: Paths to write, e.g. "name", "tags". Absent means full replacement.
       title: UpdatePetRequest
       additionalProperties: false
-      description: |-
-        UpdatePetRequest changes an existing pet.
-
-         Partial updates are expressed with update_mask, following AIP-134:
-
-           - update_mask present: only the named paths are written. Every other field is
-             left exactly as stored, whatever the request carries for it.
-           - update_mask absent: full replacement, for backwards compatibility with
-             clients that load a pet, edit it, and send the whole thing back.
-
-         One deviation from strict full replacement, in both modes: a status of
-         PET_STATUS_UNSPECIFIED means "leave the status alone", never "reset to
-         available". A zero enum value is indistinguishable from an unsent one on the
-         wire, and silently moving an adopted pet back to available is never what a
-         caller meant.
-
-         The scalar fields are `optional` so a partial request can omit them without
-         tripping the length and pattern rules below; those rules apply only to fields
-         the caller actually sends.
     pet.v1.UpdatePetResponse:
       type: object
       properties:
@@ -567,3 +517,7 @@ components:
 security: []
 tags:
   - name: pet.v1.PetService
+    description: |-
+      Deprecated: superseded by pet.v2, which fixes destructive updates and offset
+       paging. This schema is retained so buf's compatibility guarantee still holds for
+       anyone generating against v1; the server no longer serves it.

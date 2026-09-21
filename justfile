@@ -23,7 +23,7 @@ generate:
     buf generate
     buf build -o gen/image.binpb
     sqlc generate
-    mkdir -p web/public && cp gen/openapi/pet/v1/pet.openapi.yaml web/public/openapi.yaml
+    mkdir -p web/public && cp gen/openapi/pet/v2/pet.openapi.yaml web/public/openapi.yaml
 
 # Build Go binary and Vite React web frontend
 build:
@@ -155,11 +155,11 @@ run:
 
 # Run FauxRPC mock server with HTTPS, protobuf descriptor image, OpenAPI specification, and normal stubs
 fauxrpc:
-    fauxrpc run --schema=gen/image.binpb,gen/openapi/pet/v1/pet.openapi.yaml --stubs=stubs/normal --addr=127.0.0.1:8080 --https --cert=.certs/cert.pem --cert-key=.certs/key.pem --log-level=debug
+    fauxrpc run --schema=gen/image.binpb,gen/openapi/pet/v2/pet.openapi.yaml --stubs=stubs/normal --addr=127.0.0.1:8080 --https --cert=.certs/cert.pem --cert-key=.certs/key.pem --log-level=debug
 
 # Run FauxRPC mock server configured with failure stubs to test error handling
 fauxrpc-fail:
-    fauxrpc run --schema=gen/image.binpb,gen/openapi/pet/v1/pet.openapi.yaml --stubs=stubs/failures --addr=127.0.0.1:8080 --https --cert=.certs/cert.pem --cert-key=.certs/key.pem
+    fauxrpc run --schema=gen/image.binpb,gen/openapi/pet/v2/pet.openapi.yaml --stubs=stubs/failures --addr=127.0.0.1:8080 --https --cert=.certs/cert.pem --cert-key=.certs/key.pem
 
 # Run Vite React frontend dev server against backend (Go server or FauxRPC on :8080)
 web-dev:

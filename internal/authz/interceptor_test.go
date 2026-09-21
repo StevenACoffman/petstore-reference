@@ -10,27 +10,27 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	petv1 "github.com/example/pets/gen/go/pet/v1"
-	"github.com/example/pets/gen/go/pet/v1/petv1connect"
+	petv2 "github.com/example/pets/gen/go/pet/v2"
+	"github.com/example/pets/gen/go/pet/v2/petv2connect"
 	"github.com/example/pets/internal/auth"
 	"github.com/example/pets/internal/authz"
 )
 
 type stubService struct {
-	petv1connect.UnimplementedPetServiceHandler
+	petv2connect.UnimplementedPetServiceHandler
 	called bool
 }
 
 func (s *stubService) GetPet(
-	context.Context, *connect.Request[petv1.GetPetRequest],
-) (*connect.Response[petv1.GetPetResponse], error) {
+	context.Context, *connect.Request[petv2.GetPetRequest],
+) (*connect.Response[petv2.GetPetResponse], error) {
 	s.called = true
-	return connect.NewResponse(&petv1.GetPetResponse{Pet: &petv1.Pet{Name: "Rex"}}), nil
+	return connect.NewResponse(&petv2.GetPetResponse{Pet: &petv2.Pet{Name: "Rex"}}), nil
 }
 
 // newServer stands up the interceptor behind an authentication stub that injects
 // the given roles, mirroring how cmd/server orders the two.
-func newServer(t *testing.T, policy *authz.Policy, roles []string) (petv1connect.PetServiceClient, *stubService) {
+func newServer(t *testing.T, policy *authz.Policy, roles []string) (petv2connect.PetServiceClient, *stubService) {
 	t.Helper()
 
 	svc := &stubService{}
@@ -46,21 +46,21 @@ func newServer(t *testing.T, policy *authz.Policy, roles []string) (petv1connect
 			}
 		},
 	)
-	path, handler := petv1connect.NewPetServiceHandler(svc,
+	path, handler := petv2connect.NewPetServiceHandler(svc,
 		connect.WithInterceptors(injectClaims, authz.NewInterceptor(policy)))
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
-	return petv1connect.NewPetServiceClient(server.Client(), server.URL), svc
+	return petv2connect.NewPetServiceClient(server.Client(), server.URL), svc
 }
 
 func TestInterceptor(t *testing.T) {
 	t.Parallel()
 
 	policy := authz.NewPolicy(map[string][]string{
-		petv1connect.PetServiceGetPetProcedure: {"viewer"},
+		petv2connect.PetServiceGetPetProcedure: {"viewer"},
 	})
 
 	cases := map[string]struct {
@@ -91,7 +91,7 @@ func TestInterceptor(t *testing.T) {
 
 			client, svc := newServer(t, policy, tc.roles)
 
-			_, err := client.GetPet(t.Context(), connect.NewRequest(&petv1.GetPetRequest{
+			_, err := client.GetPet(t.Context(), connect.NewRequest(&petv2.GetPetRequest{
 				Id: "123e4567-e89b-12d3-a456-426614174000",
 			}))
 
@@ -112,11 +112,11 @@ func TestInterceptorLeaksNothing(t *testing.T) {
 	t.Parallel()
 
 	policy := authz.NewPolicy(map[string][]string{
-		petv1connect.PetServiceGetPetProcedure: {"secret-role"},
+		petv2connect.PetServiceGetPetProcedure: {"secret-role"},
 	})
 	client, _ := newServer(t, policy, []string{"guest"})
 
-	_, err := client.GetPet(t.Context(), connect.NewRequest(&petv1.GetPetRequest{
+	_, err := client.GetPet(t.Context(), connect.NewRequest(&petv2.GetPetRequest{
 		Id: "123e4567-e89b-12d3-a456-426614174000",
 	}))
 
@@ -133,7 +133,7 @@ func TestInterceptorRunsBeforeValidation(t *testing.T) {
 	policy := authz.NewPolicy(nil)
 	client, svc := newServer(t, policy, []string{"guest"})
 
-	_, err := client.GetPet(t.Context(), connect.NewRequest(&petv1.GetPetRequest{
+	_, err := client.GetPet(t.Context(), connect.NewRequest(&petv2.GetPetRequest{
 		Id: "not-a-uuid",
 	}))
 

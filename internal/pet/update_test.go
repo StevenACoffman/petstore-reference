@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
-	petv1 "github.com/example/pets/gen/go/pet/v1"
+	petv2 "github.com/example/pets/gen/go/pet/v2"
 	"github.com/example/pets/internal/db"
 )
 
@@ -28,7 +28,7 @@ func testUUID(t *testing.T) pgtype.UUID {
 func TestNewUpdateParamsLeavesUnnamedFieldsAlone(t *testing.T) {
 	t.Parallel()
 
-	params, err := newUpdateParams(&petv1.UpdatePetRequest{
+	params, err := newUpdateParams(&petv2.UpdatePetRequest{
 		Id:         "123e4567-e89b-12d3-a456-426614174000",
 		Name:       new("Luna II"),
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"name"}},
@@ -53,7 +53,7 @@ func TestNewUpdateParamsLeavesUnnamedFieldsAlone(t *testing.T) {
 func TestNewUpdateParamsNeverResetsStatus(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]*petv1.UpdatePetRequest{
+	cases := map[string]*petv2.UpdatePetRequest{
 		"no mask at all": {
 			Name:    new("Luna"),
 			Species: new("Cat"),
@@ -79,12 +79,12 @@ func TestNewUpdateParamsNeverResetsStatus(t *testing.T) {
 func TestNewUpdateParamsWithoutAMaskWritesWhatWasSent(t *testing.T) {
 	t.Parallel()
 
-	params, err := newUpdateParams(&petv1.UpdatePetRequest{
+	params, err := newUpdateParams(&petv2.UpdatePetRequest{
 		Name:               new("Luna"),
 		Species:            new("Cat"),
 		BirthDate:          new("2021-04-04"),
 		BirthDateEstimated: new(true),
-		Status:             petv1.PetStatus_PET_STATUS_ADOPTED.Enum(),
+		Status:             petv2.PetStatus_PET_STATUS_ADOPTED.Enum(),
 		Tags:               []string{"calico"},
 		PhotoUrls:          []string{"https://example.com/luna.jpg"},
 	}, testUUID(t), "caller@example.com")
@@ -105,7 +105,7 @@ func TestNewUpdateParamsWithoutAMaskWritesWhatWasSent(t *testing.T) {
 func TestNewUpdateParamsCanStillClear(t *testing.T) {
 	t.Parallel()
 
-	params, err := newUpdateParams(&petv1.UpdatePetRequest{
+	params, err := newUpdateParams(&petv2.UpdatePetRequest{
 		BirthDate:  new(""),
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"tags", "photo_urls", "birth_date"}},
 	}, testUUID(t), "caller@example.com")
@@ -122,7 +122,7 @@ func TestNewUpdateParamsCanStillClear(t *testing.T) {
 func TestNewUpdateParamsRejectsBadInput(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]*petv1.UpdatePetRequest{
+	cases := map[string]*petv2.UpdatePetRequest{
 		"an unknown mask path": {
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"created_by"}},
 		},
@@ -157,12 +157,12 @@ func TestNewUpdateParamsRejectsBadInput(t *testing.T) {
 func TestNewUpdateParamsWritesEachMaskedFieldExactly(t *testing.T) {
 	t.Parallel()
 
-	full := &petv1.UpdatePetRequest{
+	full := &petv2.UpdatePetRequest{
 		Name:               new("Luna"),
 		Species:            new("Cat"),
 		BirthDate:          new("2021-04-04"),
 		BirthDateEstimated: new(true),
-		Status:             petv1.PetStatus_PET_STATUS_ADOPTED.Enum(),
+		Status:             petv2.PetStatus_PET_STATUS_ADOPTED.Enum(),
 		Tags:               []string{"calico"},
 		PhotoUrls:          []string{"https://example.com/luna.jpg"},
 	}
@@ -209,7 +209,7 @@ func TestNewUpdateParamsWritesEachMaskedFieldExactly(t *testing.T) {
 		t.Run("writes "+tc.path, func(t *testing.T) {
 			t.Parallel()
 
-			msg, ok := proto.Clone(full).(*petv1.UpdatePetRequest)
+			msg, ok := proto.Clone(full).(*petv2.UpdatePetRequest)
 			require.True(t, ok, "Clone must preserve the concrete type")
 			msg.UpdateMask = &fieldmaskpb.FieldMask{Paths: []string{tc.path}}
 
@@ -230,7 +230,7 @@ func TestNewUpdateParamsEstimatedFlagIsCarriedFaithfully(t *testing.T) {
 		t.Run(map[bool]string{true: "true", false: "false"}[want], func(t *testing.T) {
 			t.Parallel()
 
-			params, err := newUpdateParams(&petv1.UpdatePetRequest{
+			params, err := newUpdateParams(&petv2.UpdatePetRequest{
 				BirthDateEstimated: new(want),
 				UpdateMask:         &fieldmaskpb.FieldMask{Paths: []string{"birth_date_estimated"}},
 			}, testUUID(t), "caller@example.com")
@@ -245,7 +245,7 @@ func TestNewUpdateParamsEstimatedFlagIsCarriedFaithfully(t *testing.T) {
 func TestNewUpdateParamsAlwaysCarriesIdentity(t *testing.T) {
 	t.Parallel()
 
-	params, err := newUpdateParams(&petv1.UpdatePetRequest{
+	params, err := newUpdateParams(&petv2.UpdatePetRequest{
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{}},
 	}, testUUID(t), "caller@example.com")
 

@@ -12,7 +12,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
-	petv1 "github.com/example/pets/gen/go/pet/v1"
+	petv2 "github.com/example/pets/gen/go/pet/v2"
 	"github.com/example/pets/internal/auth"
 	"github.com/example/pets/internal/testutil"
 )
@@ -62,12 +62,12 @@ func (s *PetHandlerTestSuite) authContext(email string) context.Context {
 func (s *PetHandlerTestSuite) TestCreatePet() {
 	ctx := s.authContext("creator@example.com")
 
-	req := connect.NewRequest(&petv1.CreatePetRequest{
+	req := connect.NewRequest(&petv2.CreatePetRequest{
 		Name:               "  Luna  ",
 		Species:            "  Cat  ",
 		BirthDate:          "2023-06-15",
 		BirthDateEstimated: true,
-		Status:             petv1.PetStatus_PET_STATUS_UNSPECIFIED, // Should default to AVAILABLE
+		Status:             petv2.PetStatus_PET_STATUS_UNSPECIFIED, // Should default to AVAILABLE
 		Tags:               []string{"calico", "friendly"},
 		PhotoUrls:          []string{"https://example.com/luna1.jpg", "https://example.com/luna2.jpg"},
 	})
@@ -82,14 +82,14 @@ func (s *PetHandlerTestSuite) TestCreatePet() {
 	s.Equal("Cat", pet.GetSpecies()) // Trimmed
 	s.Equal("2023-06-15", pet.GetBirthDate())
 	s.True(pet.GetBirthDateEstimated())
-	s.Equal(petv1.PetStatus_PET_STATUS_AVAILABLE, pet.GetStatus()) // Defaulted
+	s.Equal(petv2.PetStatus_PET_STATUS_AVAILABLE, pet.GetStatus()) // Defaulted
 	s.Equal([]string{"calico", "friendly"}, pet.GetTags())
 	s.Equal([]string{"https://example.com/luna1.jpg", "https://example.com/luna2.jpg"}, pet.GetPhotoUrls())
 	s.Equal("creator@example.com", pet.GetCreatedBy())
 	s.Equal("creator@example.com", pet.GetModifiedBy())
 
 	// Create pet without birth date (optional)
-	reqNoBirth := connect.NewRequest(&petv1.CreatePetRequest{
+	reqNoBirth := connect.NewRequest(&petv2.CreatePetRequest{
 		Name:    "Mochi",
 		Species: "Cat",
 	})
@@ -103,7 +103,7 @@ func (s *PetHandlerTestSuite) TestCreatePetValidation() {
 	ctx := s.authContext("creator@example.com")
 
 	// Blank name
-	_, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+	_, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 		Name:      "   ",
 		Species:   "Dog",
 		BirthDate: "2023-01-01",
@@ -112,7 +112,7 @@ func (s *PetHandlerTestSuite) TestCreatePetValidation() {
 	s.Equal(connect.CodeInvalidArgument, connect.CodeOf(err))
 
 	// Invalid birth date format
-	_, err = s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+	_, err = s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 		Name:      "Fido",
 		Species:   "Dog",
 		BirthDate: "not-a-date",
@@ -125,22 +125,22 @@ func (s *PetHandlerTestSuite) TestGetPet() {
 	ctx := s.authContext("user@example.com")
 
 	// 1. Not found
-	_, err := s.handler.GetPet(ctx, connect.NewRequest(&petv1.GetPetRequest{
+	_, err := s.handler.GetPet(ctx, connect.NewRequest(&petv2.GetPetRequest{
 		Id: "00000000-0000-0000-0000-000000000000",
 	}))
 	s.Require().Error(err)
 	s.Equal(connect.CodeNotFound, connect.CodeOf(err))
 
 	// 2. Existing pet
-	createResp, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+	createResp, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 		Name:      "Max",
 		Species:   "Dog",
 		BirthDate: "2021-04-10",
-		Status:    petv1.PetStatus_PET_STATUS_AVAILABLE,
+		Status:    petv2.PetStatus_PET_STATUS_AVAILABLE,
 	}))
 	s.Require().NoError(err)
 
-	getResp, err := s.handler.GetPet(ctx, connect.NewRequest(&petv1.GetPetRequest{
+	getResp, err := s.handler.GetPet(ctx, connect.NewRequest(&petv2.GetPetRequest{
 		Id: createResp.Msg.GetPet().GetId(),
 	}))
 	s.Require().NoError(err)
@@ -152,28 +152,28 @@ func (s *PetHandlerTestSuite) TestListPets() {
 	ctx := s.authContext("user@example.com")
 
 	// Seed 3 pets: 2 Dogs (1 AVAILABLE, 1 ADOPTED), 1 Cat (AVAILABLE)
-	dog1Resp, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+	dog1Resp, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 		Name:      "Dog1",
 		Species:   "Dog",
 		BirthDate: "2020-01-01",
-		Status:    petv1.PetStatus_PET_STATUS_AVAILABLE,
+		Status:    petv2.PetStatus_PET_STATUS_AVAILABLE,
 		PhotoUrls: []string{"https://example.com/dog1.jpg"},
 	}))
 	s.Require().NoError(err)
 	dog1ID := dog1Resp.Msg.GetPet().GetId()
 
-	_, err = s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
-		Name: "Dog2", Species: "Dog", BirthDate: "2021-01-01", Status: petv1.PetStatus_PET_STATUS_ADOPTED,
+	_, err = s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
+		Name: "Dog2", Species: "Dog", BirthDate: "2021-01-01", Status: petv2.PetStatus_PET_STATUS_ADOPTED,
 	}))
 	s.Require().NoError(err)
 
-	_, err = s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
-		Name: "Cat1", Species: "Cat", BirthDate: "2022-01-01", Status: petv1.PetStatus_PET_STATUS_AVAILABLE,
+	_, err = s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
+		Name: "Cat1", Species: "Cat", BirthDate: "2022-01-01", Status: petv2.PetStatus_PET_STATUS_AVAILABLE,
 	}))
 	s.Require().NoError(err)
 
 	// Filter by species "Dog"
-	dogResp, err := s.handler.ListPets(ctx, connect.NewRequest(&petv1.ListPetsRequest{
+	dogResp, err := s.handler.ListPets(ctx, connect.NewRequest(&petv2.ListPetsRequest{
 		Species: "Dog",
 	}))
 	s.Require().NoError(err)
@@ -191,8 +191,8 @@ func (s *PetHandlerTestSuite) TestListPets() {
 	s.True(foundPhoto)
 
 	// Filter by status ADOPTED
-	adoptedResp, err := s.handler.ListPets(ctx, connect.NewRequest(&petv1.ListPetsRequest{
-		Status: petv1.PetStatus_PET_STATUS_ADOPTED,
+	adoptedResp, err := s.handler.ListPets(ctx, connect.NewRequest(&petv2.ListPetsRequest{
+		Status: petv2.PetStatus_PET_STATUS_ADOPTED,
 	}))
 	s.Require().NoError(err)
 	s.Equal(int32(1), adoptedResp.Msg.GetTotalCount())
@@ -200,14 +200,14 @@ func (s *PetHandlerTestSuite) TestListPets() {
 	s.Equal("Dog2", adoptedResp.Msg.GetPets()[0].GetName())
 
 	// Pagination: walk the first two pages by token.
-	page0, err := s.handler.ListPets(ctx, connect.NewRequest(&petv1.ListPetsRequest{
+	page0, err := s.handler.ListPets(ctx, connect.NewRequest(&petv2.ListPetsRequest{
 		PageSize: 1,
 	}))
 	s.Require().NoError(err)
 	s.Len(page0.Msg.GetPets(), 1)
 	s.Require().NotEmpty(page0.Msg.GetNextPageToken())
 
-	page1, err := s.handler.ListPets(ctx, connect.NewRequest(&petv1.ListPetsRequest{
+	page1, err := s.handler.ListPets(ctx, connect.NewRequest(&petv2.ListPetsRequest{
 		PageSize:  1,
 		PageToken: page0.Msg.GetNextPageToken(),
 	}))
@@ -219,32 +219,32 @@ func (s *PetHandlerTestSuite) TestListPets() {
 func (s *PetHandlerTestSuite) TestUpdatePet() {
 	ctx := s.authContext("updater@example.com")
 
-	createResp, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+	createResp, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 		Name:      "Rocky",
 		Species:   "Dog",
 		BirthDate: "2022-05-01",
-		Status:    petv1.PetStatus_PET_STATUS_AVAILABLE,
+		Status:    petv2.PetStatus_PET_STATUS_AVAILABLE,
 	}))
 	s.Require().NoError(err)
 
-	updateResp, err := s.handler.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
+	updateResp, err := s.handler.UpdatePet(ctx, connect.NewRequest(&petv2.UpdatePetRequest{
 		Id:                 createResp.Msg.GetPet().GetId(),
 		Name:               new("Rocky Balboa"),
 		Species:            new("Dog"),
 		BirthDate:          new("2022-05-01"),
 		BirthDateEstimated: new(true),
-		Status:             petv1.PetStatus_PET_STATUS_ADOPTED.Enum(),
+		Status:             petv2.PetStatus_PET_STATUS_ADOPTED.Enum(),
 		Tags:               []string{"champion"},
 		PhotoUrls:          []string{"https://example.com/rocky.jpg"},
 	}))
 	s.Require().NoError(err)
 	s.Equal("Rocky Balboa", updateResp.Msg.GetPet().GetName())
-	s.Equal(petv1.PetStatus_PET_STATUS_ADOPTED, updateResp.Msg.GetPet().GetStatus())
+	s.Equal(petv2.PetStatus_PET_STATUS_ADOPTED, updateResp.Msg.GetPet().GetStatus())
 	s.Equal([]string{"https://example.com/rocky.jpg"}, updateResp.Msg.GetPet().GetPhotoUrls())
 	s.Equal("updater@example.com", updateResp.Msg.GetPet().GetModifiedBy())
 
 	// Update non-existent pet -> CodeNotFound
-	_, err = s.handler.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
+	_, err = s.handler.UpdatePet(ctx, connect.NewRequest(&petv2.UpdatePetRequest{
 		Id:        "00000000-0000-0000-0000-000000000000",
 		Name:      new("Ghost"),
 		Species:   new("Wolf"),
@@ -257,22 +257,22 @@ func (s *PetHandlerTestSuite) TestUpdatePet() {
 func (s *PetHandlerTestSuite) TestDeletePet() {
 	ctx := s.authContext("user@example.com")
 
-	createResp, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+	createResp, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 		Name:      "Charlie",
 		Species:   "Parrot",
 		BirthDate: "2021-08-20",
-		Status:    petv1.PetStatus_PET_STATUS_AVAILABLE,
+		Status:    petv2.PetStatus_PET_STATUS_AVAILABLE,
 	}))
 	s.Require().NoError(err)
 	petID := createResp.Msg.GetPet().GetId()
 
 	// Delete existing pet
-	delResp, err := s.handler.DeletePet(ctx, connect.NewRequest(&petv1.DeletePetRequest{Id: petID}))
+	delResp, err := s.handler.DeletePet(ctx, connect.NewRequest(&petv2.DeletePetRequest{Id: petID}))
 	s.Require().NoError(err)
 	s.True(delResp.Msg.GetSuccess())
 
 	// Delete again -> CodeNotFound
-	_, err = s.handler.DeletePet(ctx, connect.NewRequest(&petv1.DeletePetRequest{Id: petID}))
+	_, err = s.handler.DeletePet(ctx, connect.NewRequest(&petv2.DeletePetRequest{Id: petID}))
 	s.Require().Error(err)
 	s.Equal(connect.CodeNotFound, connect.CodeOf(err))
 }
@@ -290,11 +290,11 @@ func TestPetHandlerTestSuite(t *testing.T) {
 func (s *PetHandlerTestSuite) TestUpdatePetPreservesUnsentFields() {
 	ctx := s.authContext("owner@example.com")
 
-	created, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+	created, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 		Name:      "Luna",
 		Species:   "Cat",
 		BirthDate: "2021-04-04",
-		Status:    petv1.PetStatus_PET_STATUS_ADOPTED,
+		Status:    petv2.PetStatus_PET_STATUS_ADOPTED,
 		Tags:      []string{"calico", "friendly"},
 		PhotoUrls: []string{"https://example.com/luna.jpg"},
 	}))
@@ -302,7 +302,7 @@ func (s *PetHandlerTestSuite) TestUpdatePetPreservesUnsentFields() {
 	id := created.Msg.GetPet().GetId()
 
 	// A caller who only wants to rename the pet.
-	renamed, err := s.handler.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
+	renamed, err := s.handler.UpdatePet(ctx, connect.NewRequest(&petv2.UpdatePetRequest{
 		Id:         id,
 		Name:       new("Luna II"),
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"name"}},
@@ -315,7 +315,7 @@ func (s *PetHandlerTestSuite) TestUpdatePetPreservesUnsentFields() {
 	s.Equal("2021-04-04", got.GetBirthDate(), "birth date must survive a rename")
 	s.Equal([]string{"calico", "friendly"}, got.GetTags(), "tags must survive a rename")
 	s.Equal([]string{"https://example.com/luna.jpg"}, got.GetPhotoUrls())
-	s.Equal(petv1.PetStatus_PET_STATUS_ADOPTED, got.GetStatus(),
+	s.Equal(petv2.PetStatus_PET_STATUS_ADOPTED, got.GetStatus(),
 		"an adopted pet must not become available again because someone fixed a typo")
 	s.Equal("owner@example.com", got.GetModifiedBy())
 }
@@ -326,13 +326,13 @@ func (s *PetHandlerTestSuite) TestUpdatePetPreservesUnsentFields() {
 func (s *PetHandlerTestSuite) TestUpdatePetWithoutAMaskStillReplaces() {
 	ctx := s.authContext("owner@example.com")
 
-	created, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+	created, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 		Name: "Rex", Species: "Dog", Tags: []string{"old"},
-		Status: petv1.PetStatus_PET_STATUS_ADOPTED,
+		Status: petv2.PetStatus_PET_STATUS_ADOPTED,
 	}))
 	s.Require().NoError(err)
 
-	updated, err := s.handler.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
+	updated, err := s.handler.UpdatePet(ctx, connect.NewRequest(&petv2.UpdatePetRequest{
 		Id:      created.Msg.GetPet().GetId(),
 		Name:    new("Rex II"),
 		Species: new("Wolf"),
@@ -344,7 +344,7 @@ func (s *PetHandlerTestSuite) TestUpdatePetWithoutAMaskStillReplaces() {
 	s.Equal("Rex II", got.GetName())
 	s.Equal("Wolf", got.GetSpecies())
 	s.Equal([]string{"new"}, got.GetTags())
-	s.Equal(petv1.PetStatus_PET_STATUS_ADOPTED, got.GetStatus(),
+	s.Equal(petv2.PetStatus_PET_STATUS_ADOPTED, got.GetStatus(),
 		"an unspecified status leaves the stored one alone even without a mask")
 }
 
@@ -353,13 +353,13 @@ func (s *PetHandlerTestSuite) TestUpdatePetWithoutAMaskStillReplaces() {
 func (s *PetHandlerTestSuite) TestUpdatePetCanStillClearFields() {
 	ctx := s.authContext("owner@example.com")
 
-	created, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+	created, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 		Name: "Milo", Species: "Dog", BirthDate: "2020-01-01",
 		Tags: []string{"tagged"}, PhotoUrls: []string{"https://example.com/milo.jpg"},
 	}))
 	s.Require().NoError(err)
 
-	cleared, err := s.handler.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
+	cleared, err := s.handler.UpdatePet(ctx, connect.NewRequest(&petv2.UpdatePetRequest{
 		Id:         created.Msg.GetPet().GetId(),
 		BirthDate:  new(""),
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"tags", "photo_urls", "birth_date"}},
@@ -379,12 +379,12 @@ func (s *PetHandlerTestSuite) TestUpdatePetCanStillClearFields() {
 func (s *PetHandlerTestSuite) TestUpdatePetRejectsAnUnknownMaskPath() {
 	ctx := s.authContext("owner@example.com")
 
-	created, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+	created, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 		Name: "Ghost", Species: "Wolf",
 	}))
 	s.Require().NoError(err)
 
-	_, err = s.handler.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
+	_, err = s.handler.UpdatePet(ctx, connect.NewRequest(&petv2.UpdatePetRequest{
 		Id:         created.Msg.GetPet().GetId(),
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"created_by"}},
 	}))
@@ -400,14 +400,14 @@ func (s *PetHandlerTestSuite) TestListPetsCursorSurvivesConcurrentInsert() {
 	ctx := s.authContext("lister@example.com")
 
 	for i := range 4 {
-		_, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+		_, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 			Name: fmt.Sprintf("Pet%d", i), Species: "Dog",
 		}))
 		s.Require().NoError(err)
 	}
 
 	page := func(token string) ([]string, string, int32) {
-		resp, err := s.handler.ListPets(ctx, connect.NewRequest(&petv1.ListPetsRequest{
+		resp, err := s.handler.ListPets(ctx, connect.NewRequest(&petv2.ListPetsRequest{
 			PageSize: 2, PageToken: token,
 		}))
 		s.Require().NoError(err)
@@ -425,7 +425,7 @@ func (s *PetHandlerTestSuite) TestListPetsCursorSurvivesConcurrentInsert() {
 
 	// A new pet arrives between the fetches. Ordered by created_at DESC it sorts
 	// first, which is exactly what shifted every OFFSET-based window.
-	_, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+	_, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 		Name: "Newcomer", Species: "Dog",
 	}))
 	s.Require().NoError(err)
@@ -446,7 +446,7 @@ func (s *PetHandlerTestSuite) TestListPetsPaginatesToTheEnd() {
 
 	const seeded = 5
 	for i := range seeded {
-		_, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+		_, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv2.CreatePetRequest{
 			Name: fmt.Sprintf("Walk%d", i), Species: "Cat",
 		}))
 		s.Require().NoError(err)
@@ -455,7 +455,7 @@ func (s *PetHandlerTestSuite) TestListPetsPaginatesToTheEnd() {
 	var names []string
 	token := ""
 	for range seeded + 2 { // generous bound; the loop must exit on an empty token
-		resp, err := s.handler.ListPets(ctx, connect.NewRequest(&petv1.ListPetsRequest{
+		resp, err := s.handler.ListPets(ctx, connect.NewRequest(&petv2.ListPetsRequest{
 			PageSize: 2, PageToken: token, Species: "Cat",
 		}))
 		s.Require().NoError(err)
@@ -476,7 +476,7 @@ func (s *PetHandlerTestSuite) TestListPetsRejectsTheDeprecatedPageField() {
 	ctx := s.authContext("lister@example.com")
 
 	//nolint:staticcheck // SA1019: sending the deprecated field is the thing under test.
-	req := connect.NewRequest(&petv1.ListPetsRequest{PageSize: 2, Page: 1})
+	req := connect.NewRequest(&petv2.ListPetsRequest{PageSize: 2, Page: 1})
 	_, err := s.handler.ListPets(ctx, req)
 
 	s.Require().Error(err)

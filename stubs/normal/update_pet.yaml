@@ -1,6 +1,6 @@
 stubs:
   - id: update-pet
-    target: pet.v1.PetService/UpdatePet
+    target: pet.v2.PetService/UpdatePet
     cel_content: |
       {
         'pet': {
