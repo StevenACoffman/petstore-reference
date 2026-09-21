@@ -3,6 +3,7 @@ syntax = "proto3";
 package pet.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/example/pets/gen/go/pet/v1;petv1";
@@ -67,15 +68,36 @@ message ListPetsResponse {
   int32 total_count = 2;
 }
 
+// UpdatePetRequest changes an existing pet.
+//
+// Partial updates are expressed with update_mask, following AIP-134:
+//
+//   - update_mask present: only the named paths are written. Every other field is
+//     left exactly as stored, whatever the request carries for it.
+//   - update_mask absent: full replacement, for backwards compatibility with
+//     clients that load a pet, edit it, and send the whole thing back.
+//
+// One deviation from strict full replacement, in both modes: a status of
+// PET_STATUS_UNSPECIFIED means "leave the status alone", never "reset to
+// available". A zero enum value is indistinguishable from an unsent one on the
+// wire, and silently moving an adopted pet back to available is never what a
+// caller meant.
+//
+// The scalar fields are `optional` so a partial request can omit them without
+// tripping the length and pattern rules below; those rules apply only to fields
+// the caller actually sends.
 message UpdatePetRequest {
   string id = 1 [(buf.validate.field).string.uuid = true];
-  string name = 2 [(buf.validate.field).string = {min_len: 1, max_len: 100}];
-  string species = 3 [(buf.validate.field).string = {min_len: 1, max_len: 50}];
-  string birth_date = 4 [(buf.validate.field).string.pattern = "^(\\d{4}-\\d{2}-\\d{2})?$"];
-  PetStatus status = 5 [(buf.validate.field).enum.defined_only = true];
+  optional string name = 2 [(buf.validate.field).string = {min_len: 1, max_len: 100}];
+  optional string species = 3 [(buf.validate.field).string = {min_len: 1, max_len: 50}];
+  optional string birth_date = 4 [(buf.validate.field).string.pattern = "^(\\d{4}-\\d{2}-\\d{2})?$"];
+  optional PetStatus status = 5 [(buf.validate.field).enum.defined_only = true];
   repeated string photo_urls = 6 [(buf.validate.field).repeated.items.string.uri = true];
   repeated string tags = 7;
-  bool birth_date_estimated = 8;
+  optional bool birth_date_estimated = 8;
+
+  // Paths to write, e.g. "name", "tags". Absent means full replacement.
+  google.protobuf.FieldMask update_mask = 9;
 }
 
 message UpdatePetResponse {

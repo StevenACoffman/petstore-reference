@@ -5,15 +5,15 @@
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv1";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv1";
 import { file_buf_validate_validate } from "../../buf/validate/validate_pb";
-import type { Timestamp } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { FieldMask, Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_field_mask, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file pet/v1/pet.proto.
  */
 export const file_pet_v1_pet: GenFile = /*@__PURE__*/
-  fileDesc("ChBwZXQvdjEvcGV0LnByb3RvEgZwZXQudjEiiQMKA1BldBIUCgJpZBgBIAEoCUIIukgFcgOwAQESFwoEbmFtZRgCIAEoCUIJukgGcgQQARhkEhoKB3NwZWNpZXMYAyABKAlCCbpIBnIEEAEYMhIxCgpiaXJ0aF9kYXRlGAQgASgJQh26SBpyGDIWXihcZHs0fS1cZHsyfS1cZHsyfSk/JBIrCgZzdGF0dXMYBSABKA4yES5wZXQudjEuUGV0U3RhdHVzQgi6SAWCAQIQARIhCgpwaG90b191cmxzGAYgAygJQg26SAqSAQciBXIDiAEBEgwKBHRhZ3MYByADKAkSLgoKY3JlYXRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLbW9kaWZpZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmNyZWF0ZWRfYnkYCiABKAkSEwoLbW9kaWZpZWRfYnkYCyABKAkSHAoUYmlydGhfZGF0ZV9lc3RpbWF0ZWQYDCABKAgi9gEKEENyZWF0ZVBldFJlcXVlc3QSFwoEbmFtZRgBIAEoCUIJukgGcgQQARhkEhoKB3NwZWNpZXMYAiABKAlCCbpIBnIEEAEYMhIxCgpiaXJ0aF9kYXRlGAMgASgJQh26SBpyGDIWXihcZHs0fS1cZHsyfS1cZHsyfSk/JBIrCgZzdGF0dXMYBCABKA4yES5wZXQudjEuUGV0U3RhdHVzQgi6SAWCAQIQARIhCgpwaG90b191cmxzGAUgAygJQg26SAqSAQciBXIDiAEBEgwKBHRhZ3MYBiADKAkSHAoUYmlydGhfZGF0ZV9lc3RpbWF0ZWQYByABKAgiLQoRQ3JlYXRlUGV0UmVzcG9uc2USGAoDcGV0GAEgASgLMgsucGV0LnYxLlBldCIlCg1HZXRQZXRSZXF1ZXN0EhQKAmlkGAEgASgJQgi6SAVyA7ABASIqCg5HZXRQZXRSZXNwb25zZRIYCgNwZXQYASABKAsyCy5wZXQudjEuUGV0InoKD0xpc3RQZXRzUmVxdWVzdBIhCgZzdGF0dXMYASABKA4yES5wZXQudjEuUGV0U3RhdHVzEg8KB3NwZWNpZXMYAiABKAkSHAoJcGFnZV9zaXplGAMgASgFQgm6SAYaBBhkKAASFQoEcGFnZRgEIAEoBUIHukgEGgIoACJCChBMaXN0UGV0c1Jlc3BvbnNlEhkKBHBldHMYASADKAsyCy5wZXQudjEuUGV0EhMKC3RvdGFsX2NvdW50GAIgASgFIowCChBVcGRhdGVQZXRSZXF1ZXN0EhQKAmlkGAEgASgJQgi6SAVyA7ABARIXCgRuYW1lGAIgASgJQgm6SAZyBBABGGQSGgoHc3BlY2llcxgDIAEoCUIJukgGcgQQARgyEjEKCmJpcnRoX2RhdGUYBCABKAlCHbpIGnIYMhZeKFxkezR9LVxkezJ9LVxkezJ9KT8kEisKBnN0YXR1cxgFIAEoDjIRLnBldC52MS5QZXRTdGF0dXNCCLpIBYIBAhABEiEKCnBob3RvX3VybHMYBiADKAlCDbpICpIBByIFcgOIAQESDAoEdGFncxgHIAMoCRIcChRiaXJ0aF9kYXRlX2VzdGltYXRlZBgIIAEoCCItChFVcGRhdGVQZXRSZXNwb25zZRIYCgNwZXQYASABKAsyCy5wZXQudjEuUGV0IigKEERlbGV0ZVBldFJlcXVlc3QSFAoCaWQYASABKAlCCLpIBXIDsAEBIiQKEURlbGV0ZVBldFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgqcQoJUGV0U3RhdHVzEhoKFlBFVF9TVEFUVVNfVU5TUEVDSUZJRUQQABIYChRQRVRfU1RBVFVTX0FWQUlMQUJMRRABEhYKElBFVF9TVEFUVVNfUEVORElORxACEhYKElBFVF9TVEFUVVNfQURPUFRFRBADMsoCCgpQZXRTZXJ2aWNlEkAKCUNyZWF0ZVBldBIYLnBldC52MS5DcmVhdGVQZXRSZXF1ZXN0GhkucGV0LnYxLkNyZWF0ZVBldFJlc3BvbnNlEjcKBkdldFBldBIVLnBldC52MS5HZXRQZXRSZXF1ZXN0GhYucGV0LnYxLkdldFBldFJlc3BvbnNlEj0KCExpc3RQZXRzEhcucGV0LnYxLkxpc3RQZXRzUmVxdWVzdBoYLnBldC52MS5MaXN0UGV0c1Jlc3BvbnNlEkAKCVVwZGF0ZVBldBIYLnBldC52MS5VcGRhdGVQZXRSZXF1ZXN0GhkucGV0LnYxLlVwZGF0ZVBldFJlc3BvbnNlEkAKCURlbGV0ZVBldBIYLnBldC52MS5EZWxldGVQZXRSZXF1ZXN0GhkucGV0LnYxLkRlbGV0ZVBldFJlc3BvbnNlQi1aK2dpdGh1Yi5jb20vZXhhbXBsZS9wZXRzL2dlbi9nby9wZXQvdjE7cGV0djFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("ChBwZXQvdjEvcGV0LnByb3RvEgZwZXQudjEiiQMKA1BldBIUCgJpZBgBIAEoCUIIukgFcgOwAQESFwoEbmFtZRgCIAEoCUIJukgGcgQQARhkEhoKB3NwZWNpZXMYAyABKAlCCbpIBnIEEAEYMhIxCgpiaXJ0aF9kYXRlGAQgASgJQh26SBpyGDIWXihcZHs0fS1cZHsyfS1cZHsyfSk/JBIrCgZzdGF0dXMYBSABKA4yES5wZXQudjEuUGV0U3RhdHVzQgi6SAWCAQIQARIhCgpwaG90b191cmxzGAYgAygJQg26SAqSAQciBXIDiAEBEgwKBHRhZ3MYByADKAkSLgoKY3JlYXRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLbW9kaWZpZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmNyZWF0ZWRfYnkYCiABKAkSEwoLbW9kaWZpZWRfYnkYCyABKAkSHAoUYmlydGhfZGF0ZV9lc3RpbWF0ZWQYDCABKAgi9gEKEENyZWF0ZVBldFJlcXVlc3QSFwoEbmFtZRgBIAEoCUIJukgGcgQQARhkEhoKB3NwZWNpZXMYAiABKAlCCbpIBnIEEAEYMhIxCgpiaXJ0aF9kYXRlGAMgASgJQh26SBpyGDIWXihcZHs0fS1cZHsyfS1cZHsyfSk/JBIrCgZzdGF0dXMYBCABKA4yES5wZXQudjEuUGV0U3RhdHVzQgi6SAWCAQIQARIhCgpwaG90b191cmxzGAUgAygJQg26SAqSAQciBXIDiAEBEgwKBHRhZ3MYBiADKAkSHAoUYmlydGhfZGF0ZV9lc3RpbWF0ZWQYByABKAgiLQoRQ3JlYXRlUGV0UmVzcG9uc2USGAoDcGV0GAEgASgLMgsucGV0LnYxLlBldCIlCg1HZXRQZXRSZXF1ZXN0EhQKAmlkGAEgASgJQgi6SAVyA7ABASIqCg5HZXRQZXRSZXNwb25zZRIYCgNwZXQYASABKAsyCy5wZXQudjEuUGV0InoKD0xpc3RQZXRzUmVxdWVzdBIhCgZzdGF0dXMYASABKA4yES5wZXQudjEuUGV0U3RhdHVzEg8KB3NwZWNpZXMYAiABKAkSHAoJcGFnZV9zaXplGAMgASgFQgm6SAYaBBhkKAASFQoEcGFnZRgEIAEoBUIHukgEGgIoACJCChBMaXN0UGV0c1Jlc3BvbnNlEhkKBHBldHMYASADKAsyCy5wZXQudjEuUGV0EhMKC3RvdGFsX2NvdW50GAIgASgFIp4DChBVcGRhdGVQZXRSZXF1ZXN0EhQKAmlkGAEgASgJQgi6SAVyA7ABARIcCgRuYW1lGAIgASgJQgm6SAZyBBABGGRIAIgBARIfCgdzcGVjaWVzGAMgASgJQgm6SAZyBBABGDJIAYgBARI2CgpiaXJ0aF9kYXRlGAQgASgJQh26SBpyGDIWXihcZHs0fS1cZHsyfS1cZHsyfSk/JEgCiAEBEjAKBnN0YXR1cxgFIAEoDjIRLnBldC52MS5QZXRTdGF0dXNCCLpIBYIBAhABSAOIAQESIQoKcGhvdG9fdXJscxgGIAMoCUINukgKkgEHIgVyA4gBARIMCgR0YWdzGAcgAygJEiEKFGJpcnRoX2RhdGVfZXN0aW1hdGVkGAggASgISASIAQESLwoLdXBkYXRlX21hc2sYCSABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrQgcKBV9uYW1lQgoKCF9zcGVjaWVzQg0KC19iaXJ0aF9kYXRlQgkKB19zdGF0dXNCFwoVX2JpcnRoX2RhdGVfZXN0aW1hdGVkIi0KEVVwZGF0ZVBldFJlc3BvbnNlEhgKA3BldBgBIAEoCzILLnBldC52MS5QZXQiKAoQRGVsZXRlUGV0UmVxdWVzdBIUCgJpZBgBIAEoCUIIukgFcgOwAQEiJAoRRGVsZXRlUGV0UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCCpxCglQZXRTdGF0dXMSGgoWUEVUX1NUQVRVU19VTlNQRUNJRklFRBAAEhgKFFBFVF9TVEFUVVNfQVZBSUxBQkxFEAESFgoSUEVUX1NUQVRVU19QRU5ESU5HEAISFgoSUEVUX1NUQVRVU19BRE9QVEVEEAMyygIKClBldFNlcnZpY2USQAoJQ3JlYXRlUGV0EhgucGV0LnYxLkNyZWF0ZVBldFJlcXVlc3QaGS5wZXQudjEuQ3JlYXRlUGV0UmVzcG9uc2USNwoGR2V0UGV0EhUucGV0LnYxLkdldFBldFJlcXVlc3QaFi5wZXQudjEuR2V0UGV0UmVzcG9uc2USPQoITGlzdFBldHMSFy5wZXQudjEuTGlzdFBldHNSZXF1ZXN0GhgucGV0LnYxLkxpc3RQZXRzUmVzcG9uc2USQAoJVXBkYXRlUGV0EhgucGV0LnYxLlVwZGF0ZVBldFJlcXVlc3QaGS5wZXQudjEuVXBkYXRlUGV0UmVzcG9uc2USQAoJRGVsZXRlUGV0EhgucGV0LnYxLkRlbGV0ZVBldFJlcXVlc3QaGS5wZXQudjEuRGVsZXRlUGV0UmVzcG9uc2VCLVorZ2l0aHViLmNvbS9leGFtcGxlL3BldHMvZ2VuL2dvL3BldC92MTtwZXR2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_field_mask, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message pet.v1.Pet
@@ -248,6 +248,25 @@ export const ListPetsResponseSchema: GenMessage<ListPetsResponse> = /*@__PURE__*
   messageDesc(file_pet_v1_pet, 6);
 
 /**
+ * UpdatePetRequest changes an existing pet.
+ *
+ * Partial updates are expressed with update_mask, following AIP-134:
+ *
+ *   - update_mask present: only the named paths are written. Every other field is
+ *     left exactly as stored, whatever the request carries for it.
+ *   - update_mask absent: full replacement, for backwards compatibility with
+ *     clients that load a pet, edit it, and send the whole thing back.
+ *
+ * One deviation from strict full replacement, in both modes: a status of
+ * PET_STATUS_UNSPECIFIED means "leave the status alone", never "reset to
+ * available". A zero enum value is indistinguishable from an unsent one on the
+ * wire, and silently moving an adopted pet back to available is never what a
+ * caller meant.
+ *
+ * The scalar fields are `optional` so a partial request can omit them without
+ * tripping the length and pattern rules below; those rules apply only to fields
+ * the caller actually sends.
+ *
  * @generated from message pet.v1.UpdatePetRequest
  */
 export type UpdatePetRequest = Message<"pet.v1.UpdatePetRequest"> & {
@@ -257,24 +276,24 @@ export type UpdatePetRequest = Message<"pet.v1.UpdatePetRequest"> & {
   id: string;
 
   /**
-   * @generated from field: string name = 2;
+   * @generated from field: optional string name = 2;
    */
-  name: string;
+  name?: string;
 
   /**
-   * @generated from field: string species = 3;
+   * @generated from field: optional string species = 3;
    */
-  species: string;
+  species?: string;
 
   /**
-   * @generated from field: string birth_date = 4;
+   * @generated from field: optional string birth_date = 4;
    */
-  birthDate: string;
+  birthDate?: string;
 
   /**
-   * @generated from field: pet.v1.PetStatus status = 5;
+   * @generated from field: optional pet.v1.PetStatus status = 5;
    */
-  status: PetStatus;
+  status?: PetStatus;
 
   /**
    * @generated from field: repeated string photo_urls = 6;
@@ -287,9 +306,16 @@ export type UpdatePetRequest = Message<"pet.v1.UpdatePetRequest"> & {
   tags: string[];
 
   /**
-   * @generated from field: bool birth_date_estimated = 8;
+   * @generated from field: optional bool birth_date_estimated = 8;
    */
-  birthDateEstimated: boolean;
+  birthDateEstimated?: boolean;
+
+  /**
+   * Paths to write, e.g. "name", "tags". Absent means full replacement.
+   *
+   * @generated from field: google.protobuf.FieldMask update_mask = 9;
+   */
+  updateMask?: FieldMask;
 };
 
 /**

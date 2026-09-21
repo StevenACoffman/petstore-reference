@@ -89,7 +89,7 @@ func TestHandlerWithoutADatabase(t *testing.T) {
 		},
 		"UpdatePet": func() error {
 			_, err := h.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
-				Id: validUUID, Name: "Rex", Species: "dog",
+				Id: validUUID, Name: new("Rex"), Species: new("dog"),
 			}))
 			return err
 		},

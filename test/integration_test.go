@@ -156,11 +156,11 @@ func (s *PetServiceIntegrationTestSuite) TestPetLifecycle() {
 
 		req := connect.NewRequest(&petv1.UpdatePetRequest{
 			Id:                 s.createdPetID,
-			Name:               "Milo The Great",
-			Species:            "Dog",
-			BirthDate:          "2022-04-12",
-			BirthDateEstimated: true,
-			Status:             petv1.PetStatus_PET_STATUS_ADOPTED,
+			Name:               new("Milo The Great"),
+			Species:            new("Dog"),
+			BirthDate:          new("2022-04-12"),
+			BirthDateEstimated: new(true),
+			Status:             petv1.PetStatus_PET_STATUS_ADOPTED.Enum(),
 			Tags:               []string{"adopted", "happy"},
 			PhotoUrls:          []string{"https://example.com/milo-updated.jpg"},
 		})

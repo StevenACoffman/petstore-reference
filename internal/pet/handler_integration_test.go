@@ -9,6 +9,8 @@ import (
 	"connectrpc.com/connect"
 	"github.com/stretchr/testify/suite"
 
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
+
 	petv1 "github.com/example/pets/gen/go/pet/v1"
 	"github.com/example/pets/internal/auth"
 	"github.com/example/pets/internal/testutil"
@@ -226,11 +228,11 @@ func (s *PetHandlerTestSuite) TestUpdatePet() {
 
 	updateResp, err := s.handler.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
 		Id:                 createResp.Msg.GetPet().GetId(),
-		Name:               "Rocky Balboa",
-		Species:            "Dog",
-		BirthDate:          "2022-05-01",
-		BirthDateEstimated: true,
-		Status:             petv1.PetStatus_PET_STATUS_ADOPTED,
+		Name:               new("Rocky Balboa"),
+		Species:            new("Dog"),
+		BirthDate:          new("2022-05-01"),
+		BirthDateEstimated: new(true),
+		Status:             petv1.PetStatus_PET_STATUS_ADOPTED.Enum(),
 		Tags:               []string{"champion"},
 		PhotoUrls:          []string{"https://example.com/rocky.jpg"},
 	}))
@@ -243,9 +245,9 @@ func (s *PetHandlerTestSuite) TestUpdatePet() {
 	// Update non-existent pet -> CodeNotFound
 	_, err = s.handler.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
 		Id:        "00000000-0000-0000-0000-000000000000",
-		Name:      "Ghost",
-		Species:   "Wolf",
-		BirthDate: "2020-01-01",
+		Name:      new("Ghost"),
+		Species:   new("Wolf"),
+		BirthDate: new("2020-01-01"),
 	}))
 	s.Require().Error(err)
 	s.Equal(connect.CodeNotFound, connect.CodeOf(err))
@@ -279,4 +281,113 @@ func (s *PetHandlerTestSuite) TestDeletePet() {
 //nolint:paralleltest // the suite shares one Postgres container and isolates cases with
 func TestPetHandlerTestSuite(t *testing.T) {
 	suite.Run(t, new(PetHandlerTestSuite))
+}
+
+// TestUpdatePetPreservesUnsentFields is the regression test for the data-loss bug:
+// renaming a pet used to clear its tags, photo urls and birth date, and silently
+// move it from adopted back to available.
+func (s *PetHandlerTestSuite) TestUpdatePetPreservesUnsentFields() {
+	ctx := s.authContext("owner@example.com")
+
+	created, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+		Name:      "Luna",
+		Species:   "Cat",
+		BirthDate: "2021-04-04",
+		Status:    petv1.PetStatus_PET_STATUS_ADOPTED,
+		Tags:      []string{"calico", "friendly"},
+		PhotoUrls: []string{"https://example.com/luna.jpg"},
+	}))
+	s.Require().NoError(err)
+	id := created.Msg.GetPet().GetId()
+
+	// A caller who only wants to rename the pet.
+	renamed, err := s.handler.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
+		Id:         id,
+		Name:       new("Luna II"),
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"name"}},
+	}))
+	s.Require().NoError(err)
+
+	got := renamed.Msg.GetPet()
+	s.Equal("Luna II", got.GetName())
+	s.Equal("Cat", got.GetSpecies())
+	s.Equal("2021-04-04", got.GetBirthDate(), "birth date must survive a rename")
+	s.Equal([]string{"calico", "friendly"}, got.GetTags(), "tags must survive a rename")
+	s.Equal([]string{"https://example.com/luna.jpg"}, got.GetPhotoUrls())
+	s.Equal(petv1.PetStatus_PET_STATUS_ADOPTED, got.GetStatus(),
+		"an adopted pet must not become available again because someone fixed a typo")
+	s.Equal("owner@example.com", got.GetModifiedBy())
+}
+
+// TestUpdatePetWithoutAMaskStillReplaces keeps the older client contract working:
+// a caller that loads a pet, edits it and sends the whole thing back gets a full
+// replacement, with the single exception of an unspecified status.
+func (s *PetHandlerTestSuite) TestUpdatePetWithoutAMaskStillReplaces() {
+	ctx := s.authContext("owner@example.com")
+
+	created, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+		Name: "Rex", Species: "Dog", Tags: []string{"old"},
+		Status: petv1.PetStatus_PET_STATUS_ADOPTED,
+	}))
+	s.Require().NoError(err)
+
+	updated, err := s.handler.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
+		Id:      created.Msg.GetPet().GetId(),
+		Name:    new("Rex II"),
+		Species: new("Wolf"),
+		Tags:    []string{"new"},
+	}))
+	s.Require().NoError(err)
+
+	got := updated.Msg.GetPet()
+	s.Equal("Rex II", got.GetName())
+	s.Equal("Wolf", got.GetSpecies())
+	s.Equal([]string{"new"}, got.GetTags())
+	s.Equal(petv1.PetStatus_PET_STATUS_ADOPTED, got.GetStatus(),
+		"an unspecified status leaves the stored one alone even without a mask")
+}
+
+// TestUpdatePetCanStillClearFields guards the other direction: preserving unsent
+// fields must not make deliberate clearing impossible.
+func (s *PetHandlerTestSuite) TestUpdatePetCanStillClearFields() {
+	ctx := s.authContext("owner@example.com")
+
+	created, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+		Name: "Milo", Species: "Dog", BirthDate: "2020-01-01",
+		Tags: []string{"tagged"}, PhotoUrls: []string{"https://example.com/milo.jpg"},
+	}))
+	s.Require().NoError(err)
+
+	cleared, err := s.handler.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
+		Id:         created.Msg.GetPet().GetId(),
+		BirthDate:  new(""),
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"tags", "photo_urls", "birth_date"}},
+	}))
+	s.Require().NoError(err)
+
+	got := cleared.Msg.GetPet()
+	s.Empty(got.GetTags())
+	s.Empty(got.GetPhotoUrls())
+	s.Empty(got.GetBirthDate())
+	s.Equal("Milo", got.GetName(), "an unnamed field is still left alone")
+}
+
+// TestUpdatePetRejectsAnUnknownMaskPath: a client asking to change a field the
+// server does not know about has misunderstood the API; half-applying would be
+// worse than refusing.
+func (s *PetHandlerTestSuite) TestUpdatePetRejectsAnUnknownMaskPath() {
+	ctx := s.authContext("owner@example.com")
+
+	created, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+		Name: "Ghost", Species: "Wolf",
+	}))
+	s.Require().NoError(err)
+
+	_, err = s.handler.UpdatePet(ctx, connect.NewRequest(&petv1.UpdatePetRequest{
+		Id:         created.Msg.GetPet().GetId(),
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"created_by"}},
+	}))
+
+	s.Require().Error(err)
+	s.Equal(connect.CodeInvalidArgument, connect.CodeOf(err))
 }

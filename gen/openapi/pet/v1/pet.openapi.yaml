@@ -272,6 +272,9 @@ components:
           description: Deserialized error detail payload. The 'type' field indicates the schema. This field is for easier debugging and should not be relied upon for application logic.
       additionalProperties: true
       description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message, with an additional debug field for ConnectRPC error details.
+    google.protobuf.FieldMask:
+      type: string
+      description: Comma-separated field paths in lowerCamelCase (for example, `user.displayName,photo`).
     google.protobuf.Timestamp:
       type: string
       examples:
@@ -472,22 +475,29 @@ components:
           title: id
           format: uuid
         name:
-          type: string
+          type:
+            - string
+            - "null"
           title: name
           maxLength: 100
           minLength: 1
         species:
-          type: string
+          type:
+            - string
+            - "null"
           title: species
           maxLength: 50
           minLength: 1
         birthDate:
-          type: string
+          type:
+            - string
+            - "null"
           title: birth_date
           pattern: ^(\d{4}-\d{2}-\d{2})?$
         status:
-          allOf:
+          oneOf:
             - $ref: '#/components/schemas/pet.v1.PetStatus'
+            - type: "null"
           title: status
         photoUrls:
           type: array
@@ -501,10 +511,36 @@ components:
             type: string
           title: tags
         birthDateEstimated:
-          type: boolean
+          type:
+            - boolean
+            - "null"
           title: birth_date_estimated
+        updateMask:
+          allOf:
+            - $ref: '#/components/schemas/google.protobuf.FieldMask'
+          title: update_mask
+          description: Paths to write, e.g. "name", "tags". Absent means full replacement.
       title: UpdatePetRequest
       additionalProperties: false
+      description: |-
+        UpdatePetRequest changes an existing pet.
+
+         Partial updates are expressed with update_mask, following AIP-134:
+
+           - update_mask present: only the named paths are written. Every other field is
+             left exactly as stored, whatever the request carries for it.
+           - update_mask absent: full replacement, for backwards compatibility with
+             clients that load a pet, edit it, and send the whole thing back.
+
+         One deviation from strict full replacement, in both modes: a status of
+         PET_STATUS_UNSPECIFIED means "leave the status alone", never "reset to
+         available". A zero enum value is indistinguishable from an unsent one on the
+         wire, and silently moving an adopted pet back to available is never what a
+         caller meant.
+
+         The scalar fields are `optional` so a partial request can omit them without
+         tripping the length and pattern rules below; those rules apply only to fields
+         the caller actually sends.
     pet.v1.UpdatePetResponse:
       type: object
       properties:

@@ -215,27 +215,17 @@ func (h *Handler) UpdatePet(
 	if err != nil {
 		return nil, translate(ctx, op, err)
 	}
-	input, err := newPetInput(req.Msg)
-	if err != nil {
-		return nil, translate(ctx, op, err)
-	}
 	email, err := callerEmail(ctx)
 	if err != nil {
 		return nil, err
 	}
+	params, err := newUpdateParams(req.Msg, uid, email)
+	if err != nil {
+		return nil, translate(ctx, op, err)
+	}
 
 	updated, err := exec(ctx, h, func(c context.Context) (db.Pet, error) {
-		return h.queries.UpdatePet(c, db.UpdatePetParams{
-			ID:                 uid,
-			Name:               input.Name,
-			Species:            input.Species,
-			BirthDate:          input.BirthDate,
-			BirthDateEstimated: input.BirthDateEstimated,
-			Status:             input.Status,
-			PhotoUrls:          input.PhotoUrls,
-			Tags:               input.Tags,
-			ModifiedBy:         email,
-		})
+		return h.queries.UpdatePet(c, params)
 	})
 	if err != nil {
 		return nil, translate(ctx, op, err)

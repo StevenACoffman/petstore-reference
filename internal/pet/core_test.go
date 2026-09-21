@@ -126,22 +126,6 @@ func TestNewPetInput(t *testing.T) {
 	}
 }
 
-// TestNewPetInputAcceptsBothRequestTypes pins the reason petFields exists: one
-// validation path serves create and update.
-func TestNewPetInputAcceptsBothRequestTypes(t *testing.T) {
-	t.Parallel()
-
-	create := &petv1.CreatePetRequest{Name: "Rex", Species: "dog", BirthDate: "2020-01-02"}
-	update := &petv1.UpdatePetRequest{Name: "Rex", Species: "dog", BirthDate: "2020-01-02"}
-
-	fromCreate, err := newPetInput(create)
-	require.NoError(t, err)
-	fromUpdate, err := newPetInput(update)
-	require.NoError(t, err)
-
-	assert.Equal(t, fromCreate, fromUpdate)
-}
-
 func TestParseDate(t *testing.T) {
 	t.Parallel()
 

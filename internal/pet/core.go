@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -36,19 +37,6 @@ const (
 	statusPrefix = "PET_STATUS_"
 )
 
-// petFields is the subset of CreatePetRequest and UpdatePetRequest that describes a
-// pet's mutable state. Declaring it here, at the point of use, lets one validation
-// path serve both requests without either proto type knowing about the other.
-type petFields interface {
-	GetName() string
-	GetSpecies() string
-	GetBirthDate() string
-	GetBirthDateEstimated() bool
-	GetStatus() petv1.PetStatus
-	GetTags() []string
-	GetPhotoUrls() []string
-}
-
 // petInput is a create or update request after validation and normalization.
 type petInput struct {
 	Name               string
@@ -60,7 +48,10 @@ type petInput struct {
 	PhotoUrls          []string
 }
 
-// newPetInput validates and normalizes the fields shared by create and update.
+// newPetInput validates and normalizes a creation request.
+//
+// Updates do not come through here: partial-update semantics need per-field
+// presence, which newUpdateParams handles instead.
 //
 // Requires: msg is non-nil.
 // Ensures:  on success, Name and Species are trimmed and non-empty, Tags is non-nil
@@ -69,7 +60,7 @@ type petInput struct {
 //	rather than UNSPECIFIED, and BirthDate is either a valid date or an
 //	explicit null. On failure the error wraps errInvalid and names the
 //	offending field.
-func newPetInput(msg petFields) (petInput, error) {
+func newPetInput(msg *petv1.CreatePetRequest) (petInput, error) {
 	name := strings.TrimSpace(msg.GetName())
 	species := strings.TrimSpace(msg.GetSpecies())
 	if name == "" || species == "" {
@@ -225,4 +216,108 @@ func toProtoPet(p db.Pet) *petv1.Pet {
 		protoPet.ModifiedAt = timestamppb.New(p.ModifiedAt.Time)
 	}
 	return protoPet
+}
+
+// updatePaths are the update_mask paths this service understands. A mask naming
+// anything else is rejected rather than silently ignored: a client that asks to
+// change a field the server does not know about has misunderstood the API, and
+// discarding the request half-applied would be worse than refusing it.
+var updatePaths = map[string]bool{
+	"name":                 true,
+	"species":              true,
+	"birth_date":           true,
+	"birth_date_estimated": true,
+	"status":               true,
+	"photo_urls":           true,
+	"tags":                 true,
+}
+
+// newUpdateParams turns an update request into the nullable parameter set the
+// UpdatePet statement expects, where a null parameter means "leave this column".
+//
+// Two modes, per the contract documented on UpdatePetRequest:
+//   - mask present: only the named paths are written.
+//   - mask absent: full replacement of every field the caller can set.
+//
+// In both modes an unspecified status leaves the stored status alone. That is a
+// deliberate deviation from strict replacement: a zero enum is indistinguishable
+// from an unsent one, and resetting an adopted pet to available is never intended.
+//
+// Requires: msg is non-nil; id identifies the row; modifiedBy is the caller.
+// Ensures:  on success every field the mask names (or, with no mask, every field
+//
+//	the caller set) appears in the result, and no other column is
+//	touched. A mask naming an unknown path is an errInvalid failure.
+func newUpdateParams(
+	msg *petv1.UpdatePetRequest, id pgtype.UUID, modifiedBy string,
+) (db.UpdatePetParams, error) {
+	params := db.UpdatePetParams{ID: id, ModifiedBy: modifiedBy}
+
+	mask := msg.GetUpdateMask()
+	masked := mask != nil
+	if masked {
+		for _, path := range mask.GetPaths() {
+			if !updatePaths[path] {
+				return db.UpdatePetParams{}, fmt.Errorf(
+					"%w: update_mask names unknown field %q", errInvalid, path)
+			}
+		}
+	}
+	// writes reports whether a field should be written: everything the caller set
+	// when there is no mask, only the named paths when there is one.
+	writes := func(path string, setWithoutMask bool) bool {
+		if masked {
+			return slices.Contains(mask.GetPaths(), path)
+		}
+		return setWithoutMask
+	}
+
+	if writes("name", msg.Name != nil) {
+		name := strings.TrimSpace(msg.GetName())
+		if name == "" {
+			return db.UpdatePetParams{}, fmt.Errorf("%w: name cannot be blank", errInvalid)
+		}
+		params.Name = pgtype.Text{String: name, Valid: true}
+	}
+	if writes("species", msg.Species != nil) {
+		species := strings.TrimSpace(msg.GetSpecies())
+		if species == "" {
+			return db.UpdatePetParams{}, fmt.Errorf("%w: species cannot be blank", errInvalid)
+		}
+		params.Species = pgtype.Text{String: species, Valid: true}
+	}
+	if writes("birth_date", msg.BirthDate != nil) {
+		birthDate, err := parseDate(msg.GetBirthDate())
+		if err != nil {
+			return db.UpdatePetParams{}, err
+		}
+		// SetBirthDate is what distinguishes "store NULL" from "leave alone"; the
+		// column is nullable so COALESCE cannot tell those apart.
+		params.SetBirthDate = true
+		params.BirthDate = birthDate
+	}
+	if writes("birth_date_estimated", msg.BirthDateEstimated != nil) {
+		params.BirthDateEstimated = pgtype.Bool{Bool: msg.GetBirthDateEstimated(), Valid: true}
+	}
+	// An unspecified status is always "leave it", never "reset to available".
+	if writes("status", true) && msg.GetStatus() != petv1.PetStatus_PET_STATUS_UNSPECIFIED {
+		params.Status = pgtype.Text{String: msg.GetStatus().String(), Valid: true}
+	}
+	if writes("photo_urls", msg.GetPhotoUrls() != nil) {
+		params.PhotoUrls = orEmpty(msg.GetPhotoUrls())
+	}
+	if writes("tags", msg.GetTags() != nil) {
+		params.Tags = orEmpty(msg.GetTags())
+	}
+
+	return params, nil
+}
+
+// orEmpty replaces a nil slice with an empty one, so that a masked write of a
+// repeated field clears it rather than being read as "leave alone" by the SQL.
+func orEmpty(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }

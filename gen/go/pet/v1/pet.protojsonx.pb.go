@@ -7,6 +7,7 @@ package petv1
 
 import (
 	protojsonxgen "github.com/sudorandom/protojsonx/protojsonxgen"
+	fieldmaskpb "google.golang.org/protobuf/types/known/fieldmaskpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -2159,21 +2160,21 @@ func (x *UpdatePetRequest) marshalProtoJSONXTo(e *protojsonxgen.Encoder) error {
 		e.FieldPrefix(&wrote, "id")
 		e.String(x.Id)
 	}
-	if x.Name != "" {
+	if x.Name != nil {
 		e.FieldPrefix(&wrote, "name")
-		e.String(x.Name)
+		e.String(*x.Name)
 	}
-	if x.Species != "" {
+	if x.Species != nil {
 		e.FieldPrefix(&wrote, "species")
-		e.String(x.Species)
+		e.String(*x.Species)
 	}
-	if x.BirthDate != "" {
+	if x.BirthDate != nil {
 		e.FieldPrefix(&wrote, "birthDate")
-		e.String(x.BirthDate)
+		e.String(*x.BirthDate)
 	}
-	if x.Status != 0 {
+	if x.Status != nil {
 		e.FieldPrefix(&wrote, "status")
-		switch x.Status {
+		switch *x.Status {
 		case PetStatus_PET_STATUS_UNSPECIFIED:
 			e.String("PET_STATUS_UNSPECIFIED")
 		case PetStatus_PET_STATUS_AVAILABLE:
@@ -2183,7 +2184,7 @@ func (x *UpdatePetRequest) marshalProtoJSONXTo(e *protojsonxgen.Encoder) error {
 		case PetStatus_PET_STATUS_ADOPTED:
 			e.String("PET_STATUS_ADOPTED")
 		default:
-			e.Int32(int32(x.Status))
+			e.Int32(int32(*x.Status))
 		}
 	}
 	if len(x.PhotoUrls) > 0 {
@@ -2208,9 +2209,23 @@ func (x *UpdatePetRequest) marshalProtoJSONXTo(e *protojsonxgen.Encoder) error {
 		}
 		e.Byte(']')
 	}
-	if x.BirthDateEstimated {
+	if x.BirthDateEstimated != nil {
 		e.FieldPrefix(&wrote, "birthDateEstimated")
-		e.Bool(x.BirthDateEstimated)
+		e.Bool(*x.BirthDateEstimated)
+	}
+	if x.UpdateMask != nil {
+		e.FieldPrefix(&wrote, "updateMask")
+		if fast, ok := any(x.UpdateMask).(interface {
+			marshalProtoJSONXTo(*protojsonxgen.Encoder) error
+		}); ok {
+			if err := fast.marshalProtoJSONXTo(e); err != nil {
+				return err
+			}
+		} else {
+			if err := protojsonxgen.MarshalField(e, x.UpdateMask); err != nil {
+				return err
+			}
+		}
 	}
 	e.Byte('}')
 	return nil
@@ -2254,13 +2269,13 @@ func (x *UpdatePetRequest) unmarshalProtoJSONXFast(d *protojsonxgen.Decoder, dis
 			return false, nil
 		}
 		if d.ReadNull() {
-			x.Name = ""
+			x.Name = nil
 		} else {
 			v, err := d.ReadString()
 			if err != nil {
 				return false, err
 			}
-			x.Name = v
+			x.Name = &v
 		}
 	}
 	{
@@ -2275,13 +2290,13 @@ func (x *UpdatePetRequest) unmarshalProtoJSONXFast(d *protojsonxgen.Decoder, dis
 			return false, nil
 		}
 		if d.ReadNull() {
-			x.Species = ""
+			x.Species = nil
 		} else {
 			v, err := d.ReadString()
 			if err != nil {
 				return false, err
 			}
-			x.Species = v
+			x.Species = &v
 		}
 	}
 	{
@@ -2296,13 +2311,13 @@ func (x *UpdatePetRequest) unmarshalProtoJSONXFast(d *protojsonxgen.Decoder, dis
 			return false, nil
 		}
 		if d.ReadNull() {
-			x.BirthDate = ""
+			x.BirthDate = nil
 		} else {
 			v, err := d.ReadString()
 			if err != nil {
 				return false, err
 			}
-			x.BirthDate = v
+			x.BirthDate = &v
 		}
 	}
 	{
@@ -2317,7 +2332,7 @@ func (x *UpdatePetRequest) unmarshalProtoJSONXFast(d *protojsonxgen.Decoder, dis
 			return false, nil
 		}
 		if d.ReadNull() {
-			x.Status = 0
+			x.Status = nil
 		} else {
 			var v PetStatus
 			val, err := unmarshalEnum_PetStatus(d)
@@ -2329,7 +2344,7 @@ func (x *UpdatePetRequest) unmarshalProtoJSONXFast(d *protojsonxgen.Decoder, dis
 			} else {
 				v = val
 			}
-			x.Status = v
+			x.Status = &v
 		}
 	}
 	{
@@ -2422,13 +2437,43 @@ func (x *UpdatePetRequest) unmarshalProtoJSONXFast(d *protojsonxgen.Decoder, dis
 			return false, nil
 		}
 		if d.ReadNull() {
-			x.BirthDateEstimated = false
+			x.BirthDateEstimated = nil
 		} else {
 			v, err := d.ReadBool()
 			if err != nil {
 				return false, err
 			}
-			x.BirthDateEstimated = v
+			x.BirthDateEstimated = &v
+		}
+	}
+	{
+		status, err := d.MatchFast(&fastFirst, "updateMask")
+		if err != nil {
+			return false, err
+		}
+		if status == 0 {
+			return true, nil
+		}
+		if status < 0 {
+			return false, nil
+		}
+		if d.ReadNull() {
+			x.UpdateMask = nil
+		} else {
+			x.UpdateMask = &fieldmaskpb.FieldMask{}
+			if fast, ok := any(x.UpdateMask).(interface {
+				unmarshalProtoJSONXFast(*protojsonxgen.Decoder, bool) (bool, error)
+			}); ok {
+				if ok, err := fast.unmarshalProtoJSONXFast(d, discardUnknown); err != nil {
+					return false, err
+				} else if !ok {
+					return false, nil
+				}
+			} else {
+				if err := protojsonxgen.UnmarshalField(d, x.UpdateMask, discardUnknown); err != nil {
+					return false, err
+				}
+			}
 		}
 	}
 	done, err := d.TryEndObject()
@@ -2445,7 +2490,7 @@ func (x *UpdatePetRequest) unmarshalProtoJSONXFrom(d *protojsonxgen.Decoder, dis
 	if err := d.BeginObject(); err != nil {
 		return err
 	}
-	var seen [8]bool
+	var seen [9]bool
 	first := true
 	for {
 		key, ok, err := d.NextObjectKey(&first)
@@ -2477,13 +2522,13 @@ func (x *UpdatePetRequest) unmarshalProtoJSONXFrom(d *protojsonxgen.Decoder, dis
 			}
 			seen[1] = true
 			if d.ReadNull() {
-				x.Name = ""
+				x.Name = nil
 			} else {
 				v, err := d.ReadString()
 				if err != nil {
 					return err
 				}
-				x.Name = v
+				x.Name = &v
 			}
 			continue
 		case "species":
@@ -2492,13 +2537,13 @@ func (x *UpdatePetRequest) unmarshalProtoJSONXFrom(d *protojsonxgen.Decoder, dis
 			}
 			seen[2] = true
 			if d.ReadNull() {
-				x.Species = ""
+				x.Species = nil
 			} else {
 				v, err := d.ReadString()
 				if err != nil {
 					return err
 				}
-				x.Species = v
+				x.Species = &v
 			}
 			continue
 		case "birthDate", "birth_date":
@@ -2507,13 +2552,13 @@ func (x *UpdatePetRequest) unmarshalProtoJSONXFrom(d *protojsonxgen.Decoder, dis
 			}
 			seen[3] = true
 			if d.ReadNull() {
-				x.BirthDate = ""
+				x.BirthDate = nil
 			} else {
 				v, err := d.ReadString()
 				if err != nil {
 					return err
 				}
-				x.BirthDate = v
+				x.BirthDate = &v
 			}
 			continue
 		case "status":
@@ -2522,7 +2567,7 @@ func (x *UpdatePetRequest) unmarshalProtoJSONXFrom(d *protojsonxgen.Decoder, dis
 			}
 			seen[4] = true
 			if d.ReadNull() {
-				x.Status = 0
+				x.Status = nil
 			} else {
 				var v PetStatus
 				val, err := unmarshalEnum_PetStatus(d)
@@ -2534,7 +2579,7 @@ func (x *UpdatePetRequest) unmarshalProtoJSONXFrom(d *protojsonxgen.Decoder, dis
 				} else {
 					v = val
 				}
-				x.Status = v
+				x.Status = &v
 			}
 			continue
 		case "photoUrls", "photo_urls":
@@ -2609,13 +2654,35 @@ func (x *UpdatePetRequest) unmarshalProtoJSONXFrom(d *protojsonxgen.Decoder, dis
 			}
 			seen[7] = true
 			if d.ReadNull() {
-				x.BirthDateEstimated = false
+				x.BirthDateEstimated = nil
 			} else {
 				v, err := d.ReadBool()
 				if err != nil {
 					return err
 				}
-				x.BirthDateEstimated = v
+				x.BirthDateEstimated = &v
+			}
+			continue
+		case "updateMask", "update_mask":
+			if seen[8] {
+				return protojsonxgen.DuplicateField(key)
+			}
+			seen[8] = true
+			if d.ReadNull() {
+				x.UpdateMask = nil
+			} else {
+				x.UpdateMask = &fieldmaskpb.FieldMask{}
+				if slow, ok := any(x.UpdateMask).(interface {
+					unmarshalProtoJSONXFrom(*protojsonxgen.Decoder, bool) error
+				}); ok {
+					if err := slow.unmarshalProtoJSONXFrom(d, discardUnknown); err != nil {
+						return err
+					}
+				} else {
+					if err := protojsonxgen.UnmarshalField(d, x.UpdateMask, discardUnknown); err != nil {
+						return err
+					}
+				}
 			}
 			continue
 		default:

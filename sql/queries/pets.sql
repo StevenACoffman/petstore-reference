@@ -23,18 +23,24 @@ WHERE (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('species')::text IS NULL OR species = sqlc.narg('species'));
 
 -- name: UpdatePet :one
+-- A NULL parameter means "leave this column as it is", so one statement serves
+-- both a partial and a full update without a read-modify-write cycle.
+-- birth_date needs an explicit flag rather than COALESCE because it is nullable:
+-- for it, NULL is a legitimate value to store, not an absence of instruction.
 UPDATE pets
 SET
-    name = $2,
-    species = $3,
-    birth_date = $4,
-    birth_date_estimated = $5,
-    status = $6,
-    photo_urls = $7,
-    tags = $8,
+    name = COALESCE(sqlc.narg('name'), name),
+    species = COALESCE(sqlc.narg('species'), species),
+    birth_date = CASE WHEN sqlc.arg('set_birth_date')::bool
+                      THEN sqlc.narg('birth_date')::date
+                      ELSE birth_date END,
+    birth_date_estimated = COALESCE(sqlc.narg('birth_date_estimated'), birth_date_estimated),
+    status = COALESCE(sqlc.narg('status'), status),
+    photo_urls = COALESCE(sqlc.narg('photo_urls')::text[], photo_urls),
+    tags = COALESCE(sqlc.narg('tags')::text[], tags),
     modified_at = NOW(),
-    modified_by = $9
-WHERE id = $1
+    modified_by = sqlc.arg('modified_by')
+WHERE id = sqlc.arg('id')
 RETURNING *;
 
 -- name: DeletePet :execrows

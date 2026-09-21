@@ -174,42 +174,50 @@ func (q *Queries) ListPets(ctx context.Context, arg ListPetsParams) ([]Pet, erro
 const updatePet = `-- name: UpdatePet :one
 UPDATE pets
 SET
-    name = $2,
-    species = $3,
-    birth_date = $4,
-    birth_date_estimated = $5,
-    status = $6,
-    photo_urls = $7,
-    tags = $8,
+    name = COALESCE($1, name),
+    species = COALESCE($2, species),
+    birth_date = CASE WHEN $3::bool
+                      THEN $4::date
+                      ELSE birth_date END,
+    birth_date_estimated = COALESCE($5, birth_date_estimated),
+    status = COALESCE($6, status),
+    photo_urls = COALESCE($7::text[], photo_urls),
+    tags = COALESCE($8::text[], tags),
     modified_at = NOW(),
     modified_by = $9
-WHERE id = $1
+WHERE id = $10
 RETURNING id, name, species, birth_date, birth_date_estimated, status, tags, created_at, modified_at, created_by, modified_by, photo_urls
 `
 
 type UpdatePetParams struct {
-	ID                 pgtype.UUID `json:"id"`
-	Name               string      `json:"name"`
-	Species            string      `json:"species"`
+	Name               pgtype.Text `json:"name"`
+	Species            pgtype.Text `json:"species"`
+	SetBirthDate       bool        `json:"set_birth_date"`
 	BirthDate          pgtype.Date `json:"birth_date"`
-	BirthDateEstimated bool        `json:"birth_date_estimated"`
-	Status             string      `json:"status"`
+	BirthDateEstimated pgtype.Bool `json:"birth_date_estimated"`
+	Status             pgtype.Text `json:"status"`
 	PhotoUrls          []string    `json:"photo_urls"`
 	Tags               []string    `json:"tags"`
 	ModifiedBy         string      `json:"modified_by"`
+	ID                 pgtype.UUID `json:"id"`
 }
 
+// A NULL parameter means "leave this column as it is", so one statement serves
+// both a partial and a full update without a read-modify-write cycle.
+// birth_date needs an explicit flag rather than COALESCE because it is nullable:
+// for it, NULL is a legitimate value to store, not an absence of instruction.
 func (q *Queries) UpdatePet(ctx context.Context, arg UpdatePetParams) (Pet, error) {
 	row := q.db.QueryRow(ctx, updatePet,
-		arg.ID,
 		arg.Name,
 		arg.Species,
+		arg.SetBirthDate,
 		arg.BirthDate,
 		arg.BirthDateEstimated,
 		arg.Status,
 		arg.PhotoUrls,
 		arg.Tags,
 		arg.ModifiedBy,
+		arg.ID,
 	)
 	var i Pet
 	err := row.Scan(
