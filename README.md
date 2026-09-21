@@ -148,15 +148,71 @@ The service will be listening on `https://localhost:8080` (TLS enabled via `mkce
 - **Readiness:** `/readyz` — PostgreSQL is reachable. Poll this one from a balancer.
 - **Connect Service:** `https://localhost:8080/pet.v2.PetService/`
 
-Operational endpoints are served on a **separate admin listener**, bound to loopback
-(`127.0.0.1:9090`) by default, so profiling data is never exposed publicly:
-- **Prometheus metrics:** `http://127.0.0.1:9090/metrics` — RED metrics
-  (rate, errors, duration as a histogram, so p50/p95/p99 are queryable) for every RPC
-  plus Go runtime saturation signals.
-- **pprof:** `http://127.0.0.1:9090/debug/pprof/` — CPU, heap, goroutine, mutex.
-- **Execution trace snapshot:** `POST http://127.0.0.1:9090/debug/trace/snapshot`
-  writes the flight recorder's rolling buffer to a file for `go tool trace`. Enable it
-  by setting `TRACE_SNAPSHOT_DIR`.
+Operational endpoints live on a **separate admin listener**, loopback-bound
+(`127.0.0.1:9090`) so profiling data is never public:
+- `/metrics` — RED metrics as histograms (p50/p95/p99 queryable), plus Go saturation.
+- `/debug/pprof/` — CPU, heap, goroutine, mutex.
+- `POST /debug/trace/snapshot` — dumps the flight recorder for `go tool trace`.
+  Enable with `TRACE_SNAPSHOT_DIR`.
+
+### Continuous profiling
+
+Set `PYROSCOPE_ENDPOINT` and the service pushes all ten Go profile types to
+[Pyroscope](https://grafana.com/oss/pyroscope/); `just up` starts one on
+<http://localhost:4040>. Unset, nothing is collected and nothing is sent.
+
+```bash
+PYROSCOPE_ENDPOINT=http://localhost:4040 just run
+```
+
+Two details carry most of the value:
+
+- Mutex and block profiles are empty unless `SetMutexProfileFraction` and
+  `SetBlockProfileRate` are non-zero. The profiler sets both, so lock contention
+  is visible rather than silently absent.
+- The TracerProvider is wrapped so profile samples carry `trace_id` and
+  `span_name`. A slow span opens as the flame graph recorded while it ran.
+
+pprof stays on the admin listener, so a Grafana Alloy `pyroscope.scrape` can pull
+instead of the service pushing.
+
+### Load testing
+
+```bash
+just up && just run
+just load-test               # or: just load-test 2m 20
+```
+
+[`k6/load.js`](k6/load.js) drives a browse and a write scenario and sends a
+`Baggage` header carrying `k6.test_run_id` and `k6.scenario`. The server turns
+`k6.*` baggage into pprof labels, so a flame graph narrows to one run or one
+scenario — `k6_scenario="write"` shows only the create/update path. k6 does not
+send that header on its own; the script sets it.
+
+### Optional observability stack
+
+Profiling, metrics and tracing all work without this. It exists for one thing:
+clicking from a slow trace to the flame graph recorded while it ran.
+
+```bash
+just observability     # Alloy, Tempo, Prometheus, Grafana — opt-in
+OTEL_TRACES_EXPORTER=otlp OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 \
+  PYROSCOPE_ENDPOINT=http://localhost:4040 ADMIN_ADDR=0.0.0.0:9090 just run
+```
+
+Grafana is on <http://localhost:3000> with Tempo, Prometheus and Pyroscope
+provisioned, and the Tempo datasource carries `tracesToProfiles`, so a span links
+to its profile. Nothing starts unless you ask: `just up` and a plain
+`docker compose up` still bring up only Postgres and Pyroscope.
+
+`ADMIN_ADDR=0.0.0.0:9090` is needed because Alloy runs in Docker and scrapes
+`/metrics` through the host gateway; the loopback default is unreachable from a
+container. That is a real loosening — pprof becomes reachable from anything that
+can route to the host — so use it locally, not in a deployment.
+
+Traces reach Tempo through Alloy rather than directly. The service could talk to
+Tempo itself, but a collector is the shape a deployment has: one place to add
+sampling or a second destination without redeploying.
 
 ### 6. Run the Web Frontend
 ```bash

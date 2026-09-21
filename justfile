@@ -144,9 +144,17 @@ fuzz-all duration="20s":
 up:
     docker compose up -d postgres pyroscope
 
-# Stop PostgreSQL container
+# Grafana on :3000 with Tempo, Prometheus and Pyroscope wired up. Run the
+# service with OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 to feed it.
+#
+# Start the optional observability stack
+observability:
+    docker compose --profile observability up -d
+    @echo "Grafana http://localhost:3000  Pyroscope http://localhost:4040  Tempo http://localhost:3200"
+
+# Stop every container, including the optional stack
 down:
-    docker-compose down
+    docker compose --profile observability down
 
 # Run database migrations up
 migrate-up:
