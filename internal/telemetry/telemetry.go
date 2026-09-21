@@ -6,6 +6,7 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
+	otelpyroscope "github.com/grafana/otel-profiling-go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
@@ -17,7 +18,11 @@ import (
 
 // Init initializes the OpenTelemetry TracerProvider and global propagators.
 // It returns a shutdown function that flushes and cleans up the TracerProvider.
-func Init(ctx context.Context, cfg Config) (func(context.Context) error, error) {
+//
+// withProfiling wraps the provider so each span carries the id of the profile
+// recorded while it ran, which is what lets a slow trace open as a flame graph.
+// Pass false when no profiler is running: the attribute would resolve to nothing.
+func Init(ctx context.Context, cfg Config, withProfiling bool) (func(context.Context) error, error) {
 	// Set global W3C TraceContext and Baggage propagators.
 	// This enables distributed tracing across frontend, connect-rpc, and downstream services.
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
@@ -71,8 +76,13 @@ func Init(ctx context.Context, cfg Config) (func(context.Context) error, error) 
 	}
 
 	tp := sdktrace.NewTracerProvider(opts...)
-	otel.SetTracerProvider(tp)
+	if withProfiling {
+		otel.SetTracerProvider(otelpyroscope.NewTracerProvider(tp))
+	} else {
+		otel.SetTracerProvider(tp)
+	}
 
+	// Shut down the real provider; the wrapper holds no resources of its own.
 	return tp.Shutdown, nil
 }
 

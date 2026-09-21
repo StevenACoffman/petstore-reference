@@ -140,9 +140,9 @@ fuzz-all duration="20s":
         go test -run='^$' -fuzz="^${target}$" -fuzztime={{duration}} ./internal/pet/
     done
 
-# Start PostgreSQL container via docker-compose
+# Start PostgreSQL and Pyroscope via docker-compose
 up:
-    docker-compose up -d postgres
+    docker compose up -d postgres pyroscope
 
 # Stop PostgreSQL container
 down:

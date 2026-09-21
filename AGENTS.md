@@ -98,6 +98,9 @@ and if `Ensures` enumerates cases it does too much.
   Never merge them — a dependency blip must not kill healthy processes.
 - Metrics, pprof and snapshots live on the **admin listener only**. Never the public
   mux.
+- Continuous profiling is off unless `PYROSCOPE_ENDPOINT` is set. If you add a
+  profile type, set its runtime sampling rate too — mutex and block profiles are
+  empty otherwise, which looks like "no contention" rather than "not measured".
 
 ## Database
 

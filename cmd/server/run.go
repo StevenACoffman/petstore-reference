@@ -15,6 +15,7 @@ import (
 	"github.com/example/pets/internal/config"
 	"github.com/example/pets/internal/db"
 	"github.com/example/pets/internal/logging"
+	"github.com/example/pets/internal/profiling"
 	"github.com/example/pets/internal/resilience"
 	"github.com/example/pets/internal/telemetry"
 )
@@ -80,7 +81,19 @@ func run(
 		}()
 	}
 
-	if shutdownOTel, otelErr := telemetry.Init(ctx, otelCfg); otelErr != nil {
+	// Profiling starts before tracing, because whether it is running decides
+	// whether spans should carry a profile id.
+	profilingCfg := profiling.LoadConfig(getenv, otelCfg.ServiceName, otelCfg.ServiceVersion)
+	stopProfiling, profErr := profiling.Start(profilingCfg)
+	if profErr != nil {
+		logger.Warn("continuous profiling unavailable", "error", profErr)
+	} else if profilingCfg.Enabled() {
+		logger.Info("pushing continuous profiles",
+			"endpoint", profilingCfg.Endpoint, "environment", profilingCfg.Environment)
+	}
+	defer stopProfiling()
+
+	if shutdownOTel, otelErr := telemetry.Init(ctx, otelCfg, profilingCfg.Enabled()); otelErr != nil {
 		logger.Warn("opentelemetry init failed", "error", otelErr)
 	} else {
 		defer func() {

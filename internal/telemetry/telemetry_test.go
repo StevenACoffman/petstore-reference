@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -280,7 +281,7 @@ func TestInit_Sampling(t *testing.T) {
 			ExporterType:     "none",
 			SamplePercentage: 0.0,
 		}
-		shutdown, err := Init(ctx, cfg)
+		shutdown, err := Init(ctx, cfg, false)
 		require.NoError(t, err)
 		defer func() { _ = shutdown(ctx) }()
 
@@ -311,7 +312,7 @@ func TestInit_Sampling(t *testing.T) {
 			ExporterType:     "none",
 			SamplePercentage: 100.0,
 		}
-		shutdown, err := Init(ctx, cfg)
+		shutdown, err := Init(ctx, cfg, false)
 		require.NoError(t, err)
 		defer func() { _ = shutdown(ctx) }()
 
@@ -332,7 +333,7 @@ func TestInit(t *testing.T) {
 			ServiceVersion: "1.0.0",
 			ExporterType:   "none",
 		}
-		shutdown, err := Init(ctx, cfg)
+		shutdown, err := Init(ctx, cfg, false)
 		require.NoError(t, err)
 		require.NotNil(t, shutdown)
 		err = shutdown(ctx)
@@ -345,7 +346,7 @@ func TestInit(t *testing.T) {
 			ServiceVersion: "1.0.0",
 			ExporterType:   "stdout",
 		}
-		shutdown, err := Init(ctx, cfg)
+		shutdown, err := Init(ctx, cfg, false)
 		require.NoError(t, err)
 		require.NotNil(t, shutdown)
 		err = shutdown(ctx)
@@ -423,4 +424,24 @@ func (m *mockPetService) GetPet(ctx context.Context, req *connect.Request[petv2.
 	return connect.NewResponse(&petv2.GetPetResponse{
 		Pet: &petv2.Pet{Id: req.Msg.GetId(), Name: "Fido"},
 	}), nil
+}
+
+// TestInitWrapsTheProviderForProfiling pins the correlation wiring: with profiling
+// on, the installed provider is the Pyroscope wrapper, so spans carry a profile id.
+func TestInitWrapsTheProviderForProfiling(t *testing.T) { //nolint:paralleltest // installs a global TracerProvider.
+	ctx := t.Context()
+	cfg := Config{ServiceName: "wrap-test", ServiceVersion: "1.0.0", ExporterType: "none"}
+
+	shutdownPlain, err := Init(ctx, cfg, false)
+	require.NoError(t, err)
+	plain := fmt.Sprintf("%T", otel.GetTracerProvider())
+	require.NoError(t, shutdownPlain(ctx))
+
+	shutdownWrapped, err := Init(ctx, cfg, true)
+	require.NoError(t, err)
+	wrapped := fmt.Sprintf("%T", otel.GetTracerProvider())
+	require.NoError(t, shutdownWrapped(ctx))
+
+	assert.NotEqual(t, plain, wrapped, "profiling must install a different provider")
+	assert.Contains(t, wrapped, "pyroscope", "want the pyroscope wrapper, got %s", wrapped)
 }

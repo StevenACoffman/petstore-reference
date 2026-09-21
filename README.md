@@ -263,6 +263,9 @@ token or CORS origin for you.
 | `TRACE_SNAPSHOT_DIR` | unset | Enables the flight recorder and names the snapshot directory |
 | `RATE_LIMIT_RPS` | `200` | Per-instance admission rate; `0` disables it |
 | `AUTHZ_POLICY` | empty (admin only) | Role matrix: `procedure=role,role` entries separated by `;` or newlines |
+| `PYROSCOPE_ENDPOINT` | unset | Pyroscope server; empty disables continuous profiling |
+| `PYROSCOPE_BASIC_AUTH_USER` / `_PASSWORD` | unset | Grafana Cloud credentials |
+| `DEPLOYMENT_ENVIRONMENT` | `development` | Tags profiles so environments stay distinct |
 | `OTEL_SERVICE_NAME` | `pets-service` | Resource attribute shared by traces and metrics |
 | `OTEL_TRACES_EXPORTER` | `otlp` if an endpoint is set, else `none` | `otlp`, `stdout`, `none` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP gRPC collector address |
