@@ -2,6 +2,7 @@ package pet
 
 import (
 	"context"
+	"errors"
 
 	"connectrpc.com/connect"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -30,10 +31,17 @@ var _ petv1connect.PetServiceHandler = (*Handler)(nil)
 
 // NewHandler builds a Handler over the given pool.
 //
-// A nil pool is permitted so that routing and middleware can be exercised without a
-// database; every RPC will then fail with an internal error rather than panic.
+// A nil pool is accepted so the routing table can be constructed without a
+// database — cmd/server builds the whole mux that way in its routing tests. Every
+// RPC on such a handler answers Unavailable; none of them panics. That guarantee is
+// enforced in one place, by query and exec below, and asserted by
+// TestHandlerWithoutADatabase.
 func NewHandler(pool *pgxpool.Pool) *Handler {
-	return &Handler{queries: db.New(pool)}
+	h := &Handler{}
+	if pool != nil {
+		h.queries = db.New(pool)
+	}
+	return h
 }
 
 // WithResilience returns a copy of h whose read paths run under the given policies.
@@ -49,9 +57,38 @@ func (h *Handler) WithResilience(policies *resilience.DB) *Handler {
 	return &clone
 }
 
-// read runs a read-only query under the handler's resilience policies.
-func read[T any](ctx context.Context, h *Handler, op func(context.Context) (T, error)) (T, error) {
-	return resilience.Get(ctx, h.resilientDB, op)
+// errNoDatabase is returned when a handler was built without a pool. It is not a
+// condition a deployed service reaches — run() always supplies a pool — but
+// answering Unavailable beats panicking if one ever does.
+var errNoDatabase = errors.New("database is not configured")
+
+// query runs an idempotent read under the retry and circuit-breaker policies.
+//
+// Requires: op is idempotent; it may be invoked more than once.
+// Ensures:  returns errNoDatabase without invoking op when no pool was supplied.
+func query[T any](ctx context.Context, h *Handler, op func(context.Context) (T, error)) (T, error) {
+	var zero T
+	if h.queries == nil {
+		return zero, errNoDatabase
+	}
+	return resilience.Read(ctx, h.resilientDB, op)
+}
+
+// exec runs a non-idempotent write under the circuit breaker alone.
+//
+// Writes are never retried: replaying one that may already have committed is worse
+// than surfacing the error, and there is no idempotency key to make a replay safe.
+// They still go through the breaker so an outage fails fast instead of queueing on
+// the connection pool, and so a failing write helps open it.
+//
+// Requires: op has side effects; it is invoked at most once.
+// Ensures:  returns errNoDatabase without invoking op when no pool was supplied.
+func exec[T any](ctx context.Context, h *Handler, op func(context.Context) (T, error)) (T, error) {
+	var zero T
+	if h.queries == nil {
+		return zero, errNoDatabase
+	}
+	return resilience.Write(ctx, h.resilientDB, op)
 }
 
 // callerEmail reads the authenticated identity that audit columns record.
@@ -77,16 +114,18 @@ func (h *Handler) CreatePet(
 		return nil, err
 	}
 
-	created, err := h.queries.CreatePet(ctx, db.CreatePetParams{
-		Name:               input.Name,
-		Species:            input.Species,
-		BirthDate:          input.BirthDate,
-		BirthDateEstimated: input.BirthDateEstimated,
-		Status:             input.Status,
-		PhotoUrls:          input.PhotoUrls,
-		Tags:               input.Tags,
-		CreatedBy:          email,
-		ModifiedBy:         email,
+	created, err := exec(ctx, h, func(c context.Context) (db.Pet, error) {
+		return h.queries.CreatePet(c, db.CreatePetParams{
+			Name:               input.Name,
+			Species:            input.Species,
+			BirthDate:          input.BirthDate,
+			BirthDateEstimated: input.BirthDateEstimated,
+			Status:             input.Status,
+			PhotoUrls:          input.PhotoUrls,
+			Tags:               input.Tags,
+			CreatedBy:          email,
+			ModifiedBy:         email,
+		})
 	})
 	if err != nil {
 		return nil, translate(ctx, op, err)
@@ -105,7 +144,7 @@ func (h *Handler) GetPet(
 		return nil, translate(ctx, op, err)
 	}
 
-	item, err := read(ctx, h, func(c context.Context) (db.Pet, error) {
+	item, err := query(ctx, h, func(c context.Context) (db.Pet, error) {
 		return h.queries.GetPet(c, uid)
 	})
 	if err != nil {
@@ -134,7 +173,7 @@ func (h *Handler) ListPets(
 		speciesParam = pgtype.Text{String: msg.GetSpecies(), Valid: true}
 	}
 
-	pets, err := read(ctx, h, func(c context.Context) ([]db.Pet, error) {
+	pets, err := query(ctx, h, func(c context.Context) ([]db.Pet, error) {
 		return h.queries.ListPets(c, db.ListPetsParams{
 			Limit:   limit,
 			Offset:  offset,
@@ -146,7 +185,7 @@ func (h *Handler) ListPets(
 		return nil, translate(ctx, op, err)
 	}
 
-	totalCount, err := read(ctx, h, func(c context.Context) (int64, error) {
+	totalCount, err := query(ctx, h, func(c context.Context) (int64, error) {
 		return h.queries.CountPets(c, db.CountPetsParams{
 			Status:  statusParam,
 			Species: speciesParam,
@@ -185,16 +224,18 @@ func (h *Handler) UpdatePet(
 		return nil, err
 	}
 
-	updated, err := h.queries.UpdatePet(ctx, db.UpdatePetParams{
-		ID:                 uid,
-		Name:               input.Name,
-		Species:            input.Species,
-		BirthDate:          input.BirthDate,
-		BirthDateEstimated: input.BirthDateEstimated,
-		Status:             input.Status,
-		PhotoUrls:          input.PhotoUrls,
-		Tags:               input.Tags,
-		ModifiedBy:         email,
+	updated, err := exec(ctx, h, func(c context.Context) (db.Pet, error) {
+		return h.queries.UpdatePet(c, db.UpdatePetParams{
+			ID:                 uid,
+			Name:               input.Name,
+			Species:            input.Species,
+			BirthDate:          input.BirthDate,
+			BirthDateEstimated: input.BirthDateEstimated,
+			Status:             input.Status,
+			PhotoUrls:          input.PhotoUrls,
+			Tags:               input.Tags,
+			ModifiedBy:         email,
+		})
 	})
 	if err != nil {
 		return nil, translate(ctx, op, err)
@@ -213,7 +254,9 @@ func (h *Handler) DeletePet(
 		return nil, translate(ctx, op, err)
 	}
 
-	rowsAffected, err := h.queries.DeletePet(ctx, uid)
+	rowsAffected, err := exec(ctx, h, func(c context.Context) (int64, error) {
+		return h.queries.DeletePet(c, uid)
+	})
 	if err != nil {
 		return nil, translate(ctx, op, err)
 	}

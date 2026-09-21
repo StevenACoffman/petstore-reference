@@ -289,39 +289,6 @@ func TestDevIdentityMiddleware(t *testing.T) {
 	})
 }
 
-func TestHTTPMiddleware(t *testing.T) {
-	t.Parallel()
-
-	middleware := auth.Middleware(auth.Config{Enabled: true, StaticTokens: []string{"valid-token"}})
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		claims, ok := auth.FromContext(r.Context())
-		if !assert.True(t, ok) {
-			http.Error(w, "claims missing", http.StatusInternalServerError)
-			return
-		}
-		assert.Equal(t, "service@internal", claims.Email)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-
-	t.Run("rejects missing credentials", func(t *testing.T) {
-		t.Parallel()
-
-		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/photos/id", http.NoBody))
-		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
-	})
-
-	t.Run("accepts bearer credentials", func(t *testing.T) {
-		t.Parallel()
-
-		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/photos/id", http.NoBody)
-		request.Header.Set("Authorization", "Bearer valid-token")
-		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, request)
-		assert.Equal(t, http.StatusNoContent, recorder.Code)
-	})
-}
-
 func TestUserEmailFromContextRequiresIdentity(t *testing.T) {
 	t.Parallel()
 

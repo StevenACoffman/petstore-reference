@@ -107,8 +107,15 @@ conditions; if `Ensures` enumerates cases, it does too much.
   `go test -tags=integration -run TestSchemaGolden ./internal/db/ -update`
 - Transactions never appear in a service method's signature.
   `defer tx.Rollback(ctx)` immediately after a successful `Begin`.
-- Only **reads** run under the retry policy (`resilience.Get`). A retry replays the
-  call, which is unsafe for a write that may already have committed.
+- Every database call goes through one of two helpers in `internal/pet/handler.go`:
+  - `query(...)` for reads — retry **and** circuit breaker.
+  - `exec(...)` for writes — circuit breaker **only**. A retry replays the call,
+    which is unsafe for a write that may already have committed, and there is no
+    idempotency key here to make a replay safe. Give the service one and writes
+    could join the retry path.
+  Both share a single breaker, so a failing write helps open it and an open
+  breaker rejects reads and writes alike. Never call `h.queries.*` directly —
+  that bypasses both policies and the no-database guard.
 
 ## Testing
 
@@ -120,6 +127,15 @@ conditions; if `Ensures` enumerates cases, it does too much.
 - Pure core additions want a fuzz target in `internal/pet/fuzz_test.go`. Assert an
   invariant, not a fixed output.
 - No `time.Sleep` with a fixed duration. Poll against a deadline.
+- Anything added to `internal/pet/core.go` must survive `just mutate` (90% MSI).
+  Two rules that mutation testing keeps catching here:
+    - **Never assert against the constant under test.** Writing
+      `assert.Equal(t, defaultPageSize, limit)` makes the expectation move with the
+      constant, so the test cannot fail. Use the literal.
+    - **Assert every field a translation function sets.** An unasserted field is
+      exactly what a field-clearing mutant walks through.
+  A surviving mutant that is genuinely equivalent (same observable behaviour) is
+  fine — 100% is not the goal. Say so in review rather than contorting a test.
 
 ## Commits
 

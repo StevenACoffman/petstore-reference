@@ -71,7 +71,7 @@ func TestRetriesTransientFailures(t *testing.T) {
 	db := resilience.NewDB(fastConfig(), discardLogger())
 	var attempts atomic.Int32
 
-	got, err := resilience.Get(t.Context(), db, func(context.Context) (string, error) {
+	got, err := resilience.Read(t.Context(), db, func(context.Context) (string, error) {
 		if attempts.Add(1) < 3 {
 			return "", pgError("40001")
 		}
@@ -102,7 +102,7 @@ func TestDoesNotRetryDeterministicFailures(t *testing.T) {
 			db := resilience.NewDB(fastConfig(), discardLogger())
 			var attempts atomic.Int32
 
-			_, err := resilience.Get(t.Context(), db, func(context.Context) (string, error) {
+			_, err := resilience.Read(t.Context(), db, func(context.Context) (string, error) {
 				attempts.Add(1)
 				return "", failure
 			})
@@ -122,7 +122,7 @@ func TestRetriesAreBounded(t *testing.T) {
 	db := resilience.NewDB(cfg, discardLogger())
 	var attempts atomic.Int32
 
-	_, err := resilience.Get(t.Context(), db, func(context.Context) (string, error) {
+	_, err := resilience.Read(t.Context(), db, func(context.Context) (string, error) {
 		attempts.Add(1)
 		return "", pgError("40001")
 	})
@@ -145,7 +145,7 @@ func TestCircuitBreakerOpensAndRejects(t *testing.T) {
 
 	var attempts atomic.Int32
 	call := func() error {
-		_, err := resilience.Get(t.Context(), db, func(context.Context) (string, error) {
+		_, err := resilience.Read(t.Context(), db, func(context.Context) (string, error) {
 			attempts.Add(1)
 			return "", pgError("08006")
 		})
@@ -179,7 +179,7 @@ func TestCircuitBreakerIgnoresCallerErrors(t *testing.T) {
 	db := resilience.NewDB(cfg, discardLogger())
 
 	for range 10 {
-		_, err := resilience.Get(t.Context(), db, func(context.Context) (string, error) {
+		_, err := resilience.Read(t.Context(), db, func(context.Context) (string, error) {
 			return "", pgError("23505")
 		})
 		require.Error(t, err)
@@ -188,10 +188,10 @@ func TestCircuitBreakerIgnoresCallerErrors(t *testing.T) {
 	assert.Equal(t, "closed", db.State())
 }
 
-func TestGetWithNilPoliciesRunsDirectly(t *testing.T) {
+func TestReadWithNilPoliciesRunsDirectly(t *testing.T) {
 	t.Parallel()
 
-	got, err := resilience.Get(t.Context(), nil, func(context.Context) (int, error) {
+	got, err := resilience.Read(t.Context(), nil, func(context.Context) (int, error) {
 		return 42, nil
 	})
 
@@ -199,28 +199,104 @@ func TestGetWithNilPoliciesRunsDirectly(t *testing.T) {
 	assert.Equal(t, 42, got)
 }
 
-func TestDoPropagatesSuccessAndFailure(t *testing.T) {
-	t.Parallel()
-
-	db := resilience.NewDB(fastConfig(), discardLogger())
-
-	require.NoError(t, db.Do(t.Context(), func(context.Context) error { return nil }))
-
-	sentinel := errors.New("boom")
-	require.ErrorIs(t, db.Do(t.Context(), func(context.Context) error { return sentinel }), sentinel)
-}
-
-// TestGetReturnsZeroValueOnError confirms a failed call yields the zero value rather
+// TestReadReturnsZeroValueOnError confirms a failed call yields the zero value rather
 // than a partially populated result.
-func TestGetReturnsZeroValueOnError(t *testing.T) {
+func TestReadReturnsZeroValueOnError(t *testing.T) {
 	t.Parallel()
 
 	db := resilience.NewDB(fastConfig(), discardLogger())
 
-	got, err := resilience.Get(t.Context(), db, func(context.Context) (*string, error) {
+	got, err := resilience.Read(t.Context(), db, func(context.Context) (*string, error) {
 		return nil, pgError("23505")
 	})
 
 	require.Error(t, err)
 	assert.Nil(t, got)
+}
+
+// TestWriteNeverRetries is the write-path contract. A transient failure that the
+// read path would replay must be attempted exactly once here: replaying a write
+// that may already have committed is worse than surfacing the error, and this
+// service has no idempotency key to make a replay safe.
+func TestWriteNeverRetries(t *testing.T) {
+	t.Parallel()
+
+	db := resilience.NewDB(fastConfig(), discardLogger())
+	var attempts atomic.Int32
+
+	_, err := resilience.Write(t.Context(), db, func(context.Context) (string, error) {
+		attempts.Add(1)
+		return "", pgError("40001") // serialization failure: the read path WOULD retry this
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, int32(1), attempts.Load(), "a write must be attempted exactly once")
+}
+
+// TestWriteIsRejectedByAnOpenBreaker is the other half of the write contract: writes
+// must fail fast during an outage rather than queueing on the connection pool.
+func TestWriteIsRejectedByAnOpenBreaker(t *testing.T) {
+	t.Parallel()
+
+	cfg := fastConfig()
+	cfg.MaxRetries = 0
+	cfg.FailureThreshold = 2
+	cfg.OpenDelay = time.Hour
+	db := resilience.NewDB(cfg, discardLogger())
+
+	// Trip the breaker through the read path.
+	for range int(cfg.FailureThreshold) {
+		_, err := resilience.Read(t.Context(), db, func(context.Context) (string, error) {
+			return "", pgError("08006")
+		})
+		require.Error(t, err)
+	}
+	require.Equal(t, "open", db.State())
+
+	var attempts atomic.Int32
+	_, err := resilience.Write(t.Context(), db, func(context.Context) (string, error) {
+		attempts.Add(1)
+		return "ok", nil
+	})
+
+	require.ErrorIs(t, err, resilience.ErrUnavailable)
+	assert.Zero(t, attempts.Load(), "an open breaker must reject a write without running it")
+}
+
+// TestWritesTripTheSharedBreaker pins why reads and writes share one breaker: a
+// database that is only being written to must still be able to open it.
+func TestWritesTripTheSharedBreaker(t *testing.T) {
+	t.Parallel()
+
+	cfg := fastConfig()
+	cfg.MaxRetries = 0
+	cfg.FailureThreshold = 3
+	cfg.OpenDelay = time.Hour
+	db := resilience.NewDB(cfg, discardLogger())
+
+	for range int(cfg.FailureThreshold) {
+		_, err := resilience.Write(t.Context(), db, func(context.Context) (string, error) {
+			return "", pgError("08006")
+		})
+		require.Error(t, err)
+	}
+
+	assert.Equal(t, "open", db.State(), "failing writes must open the shared breaker")
+
+	// And the read path now fails fast too, because the breaker is shared.
+	_, err := resilience.Read(t.Context(), db, func(context.Context) (string, error) {
+		return "ok", nil
+	})
+	require.ErrorIs(t, err, resilience.ErrUnavailable)
+}
+
+func TestWriteWithNilPoliciesRunsDirectly(t *testing.T) {
+	t.Parallel()
+
+	got, err := resilience.Write(t.Context(), nil, func(context.Context) (int, error) {
+		return 7, nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 7, got)
 }

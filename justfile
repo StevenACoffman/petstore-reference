@@ -49,6 +49,34 @@ lint:
 lint-fix:
     golangci-lint run --fix ./...
 
+# Mutation testing asks what coverage cannot: not "did a test execute this line?"
+# but "would any test have noticed if it behaved differently?". Scoped to core.go
+# because that is the pure half of internal/pet — the shell's behaviour is proven
+# by the container-backed suites, which a mutation run does not execute.
+#
+# Mutation-test the pure core; fails below the threshold (exit code 4)
+mutate threshold="90":
+    mutago --min-msi={{threshold}} --quiet --no-diffs ./internal/pet/core.go
+
+# Mutation-test the core and show the diff for every surviving mutant.
+mutate-report:
+    mutago --html-output ./internal/pet/core.go
+    @echo "wrote mutago-report.html"
+
+# This is what makes the technique affordable on a large codebase: seconds per
+# pull request rather than minutes over the whole tree.
+#
+# Mutation-test only the lines changed against a base ref
+mutate-diff base="main":
+    mutago --git-diff-lines --git-diff-base={{base}} --quiet --no-diffs ./internal/...
+
+# The score is dragged down by handler.go, whose behaviour lives in the
+# integration suite rather than the unit tests a mutation run executes.
+#
+# Whole-package mutation run, informational only; read it per-file
+mutate-all:
+    mutago --quiet --no-diffs ./internal/pet/
+
 # Verify go.mod/go.sum are tidy (CI runs this; a dirty tree fails the build)
 tidy-check:
     #!/usr/bin/env bash

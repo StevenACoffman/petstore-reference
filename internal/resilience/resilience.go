@@ -74,9 +74,16 @@ func DefaultConfig() Config {
 var ErrUnavailable = errors.New("dependency unavailable")
 
 // DB applies the database-facing policies to an operation.
+//
+// Reads and writes get different policies but share one breaker. The shared
+// breaker is the point: a write failing during an outage must count towards
+// opening it, and once open it must reject reads and writes alike.
 type DB struct {
-	executor failsafe.Executor[any]
-	breaker  circuitbreaker.CircuitBreaker[any]
+	// query retries transient failures, then consults the breaker.
+	query failsafe.Executor[any]
+	// exec consults the breaker but never retries — see NewDB.
+	exec    failsafe.Executor[any]
+	breaker circuitbreaker.CircuitBreaker[any]
 }
 
 // NewDB builds the retry and circuit-breaker pair for database work.
@@ -116,48 +123,68 @@ func NewDB(cfg Config, logger *slog.Logger) *DB {
 		Build()
 
 	return &DB{
-		executor: failsafe.With[any](retry, breaker),
-		breaker:  breaker,
+		query: failsafe.With[any](retry, breaker),
+		// Writes deliberately get the breaker WITHOUT the retry policy. Replaying a
+		// write that may already have committed is worse than surfacing the error,
+		// and this service has no idempotency key to make a replay safe
+		// (summary_rules §12: "make every mutating operation idempotent — assign a
+		// client-generated idempotency key"). Add one and writes could join the
+		// retry path; until then they only fail fast.
+		exec:    failsafe.With[any](breaker),
+		breaker: breaker,
 	}
 }
 
 // State reports the circuit breaker's current state, for the readiness endpoint.
 func (d *DB) State() string { return d.breaker.State().String() }
 
-// Do runs op under the retry and circuit-breaker policies.
-//
-// Requires: op is idempotent, because it may be invoked more than once.
-// Ensures:  returns ErrUnavailable when the breaker rejected the call outright;
-//
-//	otherwise returns op's own error unchanged, so callers can still match
-//	on pgx sentinels.
-func (d *DB) Do(ctx context.Context, op func(context.Context) error) error {
-	_, err := Get(ctx, d, func(innerCtx context.Context) (any, error) {
-		return nil, op(innerCtx)
-	})
-	return err
-}
-
-// Get runs a value-returning operation under db's policies.
+// Read runs an idempotent operation under the retry and circuit-breaker policies.
 //
 // It is a function rather than a method because Go does not allow methods to
 // introduce new type parameters.
 //
-// Requires: op is idempotent. A nil db runs op directly, which keeps resilience
+// Requires: op is idempotent — a transient failure replays it. A nil db runs op
 //
-//	optional for tests and for callers that have not opted in.
+//	directly, which keeps resilience optional for callers that have not
+//	opted in.
 //
 // Ensures: returns ErrUnavailable when the breaker is open; otherwise op's result.
-func Get[T any](ctx context.Context, db *DB, op func(context.Context) (T, error)) (T, error) {
-	var zero T
+func Read[T any](ctx context.Context, db *DB, op func(context.Context) (T, error)) (T, error) {
 	if db == nil {
 		return op(ctx)
 	}
+	return runUnder(ctx, db.query, op)
+}
+
+// Write runs a non-idempotent operation under the circuit breaker alone.
+//
+// It is never retried: replaying a write that may already have committed is worse
+// than surfacing the error, and this service has no idempotency key to make a
+// replay safe (summary_rules §12). It still goes through the breaker so an outage
+// fails fast, and so a failing write helps open the shared breaker.
+//
+// Requires: op has side effects; it is invoked at most once.
+// Ensures:  returns ErrUnavailable when the breaker is open, without invoking op;
+//
+//	otherwise op's result.
+func Write[T any](ctx context.Context, db *DB, op func(context.Context) (T, error)) (T, error) {
+	if db == nil {
+		return op(ctx)
+	}
+	return runUnder(ctx, db.exec, op)
+}
+
+// runUnder executes op through the given executor, unboxing the any-typed result
+// failsafe works in.
+func runUnder[T any](
+	ctx context.Context, executor failsafe.Executor[any], op func(context.Context) (T, error),
+) (T, error) {
+	var zero T
 
 	// ctx is passed straight through rather than read back from the execution: the
-	// executor carries no timeout policy, so exec.Context() is this same context, and
-	// forwarding it directly keeps the data flow obvious.
-	result, err := db.executor.WithContext(ctx).Get(func() (any, error) {
+	// executors carry no timeout policy, so the execution context is this same
+	// context, and forwarding it directly keeps the data flow obvious.
+	result, err := executor.WithContext(ctx).Get(func() (any, error) {
 		return op(ctx)
 	})
 	if err != nil {

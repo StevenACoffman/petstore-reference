@@ -114,24 +114,6 @@ func NewInterceptor(cfg Config) connect.UnaryInterceptorFunc {
 	}
 }
 
-// Middleware applies the same authentication policy to ordinary HTTP handlers.
-func Middleware(cfg Config) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !cfg.Enabled {
-				next.ServeHTTP(w, r.WithContext(WithClaims(r.Context(), &Claims{Subject: "anonymous", Email: "anonymous", Provider: "disabled"})))
-				return
-			}
-			claims, err := authenticate(r.Context(), r.Header, cfg)
-			if err != nil {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(WithClaims(r.Context(), claims)))
-		})
-	}
-}
-
 func authenticate(ctx context.Context, header http.Header, cfg Config) (*Claims, error) {
 	if cfg.TrustProxyHeaders {
 		iapEmail := header.Get("X-Goog-Authenticated-User-Email")

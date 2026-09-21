@@ -8,6 +8,8 @@ import (
 	"connectrpc.com/connect"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/example/pets/internal/resilience"
 )
 
 // PostgreSQL SQLSTATE codes this service distinguishes.
@@ -30,6 +32,7 @@ var (
 	errConflict      = errors.New("conflicting concurrent update, retry the request")
 	errConstraint    = errors.New("request violates a data constraint")
 	errInternal      = errors.New("internal error")
+	errUnavailable   = errors.New("service temporarily unavailable, retry later")
 	errUnauthClaims  = errors.New("authenticated identity has no email")
 )
 
@@ -50,6 +53,17 @@ func translate(ctx context.Context, op string, err error) error {
 	// A validation failure from the core is the caller's fault and safe to echo.
 	if errors.Is(err, errInvalid) {
 		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	// An open circuit breaker, or a handler with no pool at all, means the request
+	// was never attempted. Unavailable is what tells a well-behaved client to back
+	// off and retry later; reporting Internal here would make a transient outage
+	// look like a bug in the service and suppress the retry the breaker is asking
+	// for. This branch comes first because these errors carry no SQLSTATE and would
+	// otherwise fall through to the catch-all.
+	if errors.Is(err, resilience.ErrUnavailable) || errors.Is(err, errNoDatabase) {
+		slog.WarnContext(ctx, "request rejected before reaching the database",
+			"op", op, "error", err)
+		return connect.NewError(connect.CodeUnavailable, errUnavailable)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return connect.NewError(connect.CodeNotFound, errNotFound)

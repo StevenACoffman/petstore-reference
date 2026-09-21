@@ -145,9 +145,9 @@ func parseUUID(field, value string) (pgtype.UUID, error) {
 // pageBounds converts a page number and size into SQL LIMIT and OFFSET values.
 //
 // Requires: nothing; out-of-range input is reported rather than truncated silently.
-// Ensures:  limit is in [1, maxPageSize]; offset is non-negative and fits in int32,
+// Ensures:  on success limit is in [1, maxPageSize] and offset is a non-negative
 //
-//	or the error wraps errInvalid.
+//	int32; on failure both are zero and the error wraps errInvalid.
 func pageBounds(page, pageSize int32) (limit, offset int32, err error) {
 	limit = defaultPageSize
 	if pageSize > 0 {

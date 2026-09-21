@@ -131,6 +131,31 @@ jobs:
           path: internal/pet/testdata/fuzz/
           retention-days: 30
 
+  mutation:
+    name: Mutation testing (pure core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@v3
+        with:
+          cache: true
+      # Scoped to the pure core and gated at a threshold the suite already clears.
+      # A gate that is red on arrival teaches people to ignore it; raise it as
+      # surviving mutants get killed.
+      - name: Mutation-test internal/pet/core.go
+        run: mutago --min-msi=90 --quiet --no-diffs --logger-github ./internal/pet/core.go
+      # Informational: surviving mutants on the lines this PR actually changed,
+      # anywhere in internal/. Never fails the build — it is a review aid, and
+      # newly written code has not had a chance to earn a threshold yet.
+      - name: Surviving mutants on changed lines
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          mutago --git-diff-lines --git-diff-base=origin/${{ github.base_ref }} \
+                 --quiet --no-diffs --logger-github ./internal/...
+
   vulncheck:
     name: Vulnerability scan
     runs-on: ubuntu-latest

@@ -216,15 +216,7 @@ func (s *DBTestSuite) TestPetQueries() {
 	s.Equal([]string{"https://example.com/buddy2.jpg"}, updated.PhotoUrls)
 	s.True(updated.BirthDateEstimated)
 
-	// 5. TouchPet
-	touched, err := queries.TouchPet(s.ctx, db.TouchPetParams{
-		ID:         created.ID,
-		ModifiedBy: "modifier@example.com",
-	})
-	s.Require().NoError(err)
-	s.Equal("modifier@example.com", touched.ModifiedBy)
-
-	// 6. DeletePet
+	// 5. DeletePet
 	rowsAffected, err := queries.DeletePet(s.ctx, created.ID)
 	s.Require().NoError(err)
 	s.Equal(int64(1), rowsAffected)

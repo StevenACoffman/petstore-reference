@@ -171,39 +171,6 @@ func (q *Queries) ListPets(ctx context.Context, arg ListPetsParams) ([]Pet, erro
 	return items, nil
 }
 
-const touchPet = `-- name: TouchPet :one
-UPDATE pets
-SET modified_at = NOW(),
-    modified_by = $2
-WHERE id = $1
-RETURNING id, name, species, birth_date, birth_date_estimated, status, tags, created_at, modified_at, created_by, modified_by, photo_urls
-`
-
-type TouchPetParams struct {
-	ID         pgtype.UUID `json:"id"`
-	ModifiedBy string      `json:"modified_by"`
-}
-
-func (q *Queries) TouchPet(ctx context.Context, arg TouchPetParams) (Pet, error) {
-	row := q.db.QueryRow(ctx, touchPet, arg.ID, arg.ModifiedBy)
-	var i Pet
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Species,
-		&i.BirthDate,
-		&i.BirthDateEstimated,
-		&i.Status,
-		&i.Tags,
-		&i.CreatedAt,
-		&i.ModifiedAt,
-		&i.CreatedBy,
-		&i.ModifiedBy,
-		&i.PhotoUrls,
-	)
-	return i, err
-}
-
 const updatePet = `-- name: UpdatePet :one
 UPDATE pets
 SET

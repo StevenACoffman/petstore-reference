@@ -111,6 +111,12 @@ just fuzz-all 20s
 # ...or one target for longer
 just fuzz FuzzNewPetInput 60s
 
+# Mutation-test the pure core (fails below 90% MSI)
+just mutate
+
+# Mutation-test only the lines changed against a base ref
+just mutate-diff main
+
 # Verify go.mod/go.sum are tidy
 just tidy-check
 
@@ -217,6 +223,15 @@ Tests that touch the database run against real PostgreSQL (`postgres:17-alpine`)
   targets in [`fuzz_test.go`](internal/pet/fuzz_test.go) that assert invariants rather
   than fixed outputs — for example, that a pet accepted by `newPetInput` always has
   trimmed, non-blank fields and non-nil slices, whatever bytes arrived on the wire.
+- **Mutation testing** with [mutago](https://github.com/quality-gates/mutago) over
+  `internal/pet/core.go`, currently **92.9% MSI** in about 30 seconds. Mutation
+  testing answers what coverage cannot: not "did a test execute this line?" but
+  "would any test have noticed if it behaved differently?". It is scoped to the pure
+  core because that is where the invariants live — `handler.go` is proven by the
+  container-backed suites, which a mutation run does not execute, so scoring it here
+  would measure the wrong thing. Configuration lives in
+  [`.mutago.yml`](.mutago.yml); the CI job also reports surviving mutants on the
+  lines a pull request changed.
 - **Golden schema snapshot**: [`internal/db/testdata/schema.golden`](internal/db/testdata/schema.golden)
   pins the schema the migrations produce, so a migration that drops a column or
   loosens a constraint shows up as a reviewable diff. Refresh it with
@@ -272,10 +287,11 @@ actually has:
   failures, deadlocks, and connection-class errors. Writes are non-idempotent, so
   they deliberately stay outside the retry policy: replaying one that may already
   have committed is worse than surfacing the error.
-- **Circuit breaker** on the database path, so an outage fails fast with
-  `Unavailable` instead of parking every request on a connection-pool wait. Its
-  predicate ignores caller errors — a stream of constraint violations means bad
-  requests, not an unhealthy database, and must not trip it.
+- **Circuit breaker** on the database path — covering reads *and* writes, sharing
+  one breaker — so an outage fails fast with `Unavailable` instead of parking every
+  request on a connection-pool wait. Its predicate ignores caller errors: a stream
+  of constraint violations means bad requests, not an unhealthy database, and must
+  not trip it. Writes get the breaker without the retry, for the reason above.
 - **Rate limiting** as a Connect interceptor (`RATE_LIMIT_RPS`), using a smooth
   limiter so permits are spaced evenly rather than arriving as a burst.
 - **Per-RPC deadlines**, so one slow query cannot hold a pool connection for as long

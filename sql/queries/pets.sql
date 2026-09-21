@@ -41,9 +41,3 @@ RETURNING *;
 DELETE FROM pets
 WHERE id = $1;
 
--- name: TouchPet :one
-UPDATE pets
-SET modified_at = NOW(),
-    modified_by = $2
-WHERE id = $1
-RETURNING *;

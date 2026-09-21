@@ -96,54 +96,6 @@ func NewProvider(pool *pgxpool.Pool) (*goose.Provider, func(), error) {
 	return provider, cleanup, nil
 }
 
-// MigrateTo applies migrations up to (and including) the specified version.
-func MigrateTo(ctx context.Context, pool *pgxpool.Pool, version int64) error {
-	provider, cleanup, err := NewProvider(pool)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-
-	results, err := provider.UpTo(ctx, version)
-	if err != nil {
-		return fmt.Errorf("failed to apply migrations up to version %d: %w", version, err)
-	}
-
-	for _, res := range results {
-		slog.Info("Applied migration",
-			"version", res.Source.Version,
-			"path", res.Source.Path,
-			"duration", res.Duration,
-		)
-	}
-
-	return nil
-}
-
-// MigrateDownTo rolls back migrations down to (but not including) the specified version.
-func MigrateDownTo(ctx context.Context, pool *pgxpool.Pool, version int64) error {
-	provider, cleanup, err := NewProvider(pool)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-
-	results, err := provider.DownTo(ctx, version)
-	if err != nil {
-		return fmt.Errorf("failed to rollback migrations down to version %d: %w", version, err)
-	}
-
-	for _, res := range results {
-		slog.Info("Rolled back migration",
-			"version", res.Source.Version,
-			"path", res.Source.Path,
-			"duration", res.Duration,
-		)
-	}
-
-	return nil
-}
-
 // GetDBVersion returns the current migration version of the database.
 func GetDBVersion(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
 	provider, cleanup, err := NewProvider(pool)

@@ -5,6 +5,9 @@ dist/
 /server
 /migrate
 coverage.out
+# Mutation testing reports
+mutago-report.html
+mutago-*.json
 *.exe
 *.exe~
 *.dll
