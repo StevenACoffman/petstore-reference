@@ -93,8 +93,19 @@ tidy-check:
 vulncheck:
     govulncheck ./...
 
+# Lint the protobuf schema
+buf-lint:
+    buf lint
+
+# CI runs this on every PR; running it locally is what would have caught the
+# pet.v1 break before it was committed.
+#
+# Fail if the protobuf schema breaks compatibility with the base branch
+buf-breaking base="main":
+    buf breaking --against ".git#branch={{base}}"
+
 # Run every quality and security gate the CI pipeline runs
-check: tidy-check lint vulncheck test test-web
+check: tidy-check buf-lint buf-breaking lint vulncheck test test-web
 
 # Run the container-backed suites (needs a running Docker/Colima daemon)
 test-integration:
