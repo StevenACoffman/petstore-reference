@@ -387,7 +387,16 @@ components:
           title: page
           minimum: 0
           format: int32
-          description: Page token / offset
+          description: |-
+            Deprecated: offset paging skipped rows inserted between fetches and served
+             others twice. Sending a non-zero value is rejected; use page_token.
+          deprecated: true
+        pageToken:
+          type: string
+          title: page_token
+          description: |-
+            Opaque token from a previous response's next_page_token. Empty starts at the
+             first page.
       title: ListPetsRequest
       additionalProperties: false
     pet.v1.ListPetsResponse:
@@ -402,6 +411,11 @@ components:
           type: integer
           title: total_count
           format: int32
+          description: Pets matching the filters, ignoring the page token.
+        nextPageToken:
+          type: string
+          title: next_page_token
+          description: Token for the next page; empty when this is the last one.
       title: ListPetsResponse
       additionalProperties: false
     pet.v1.Pet:

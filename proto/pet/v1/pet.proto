@@ -59,13 +59,25 @@ message ListPetsRequest {
   string species = 2;
   // Maximum number of pets to return
   int32 page_size = 3 [(buf.validate.field).int32 = {gte: 0, lte: 100}];
-  // Page token / offset
-  int32 page = 4 [(buf.validate.field).int32 = {gte: 0}];
+
+  // Deprecated: offset paging skipped rows inserted between fetches and served
+  // others twice. Sending a non-zero value is rejected; use page_token.
+  int32 page = 4 [
+    deprecated = true,
+    (buf.validate.field).int32 = {gte: 0}
+  ];
+
+  // Opaque token from a previous response's next_page_token. Empty starts at the
+  // first page.
+  string page_token = 5;
 }
 
 message ListPetsResponse {
   repeated Pet pets = 1;
+  // Pets matching the filters, ignoring the page token.
   int32 total_count = 2;
+  // Token for the next page; empty when this is the last one.
+  string next_page_token = 3;
 }
 
 // UpdatePetRequest changes an existing pet.

@@ -4,6 +4,7 @@ package pet
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -198,17 +199,17 @@ func (s *PetHandlerTestSuite) TestListPets() {
 	s.Len(adoptedResp.Msg.GetPets(), 1)
 	s.Equal("Dog2", adoptedResp.Msg.GetPets()[0].GetName())
 
-	// Pagination: PageSize=1, Page=0 then Page=1
+	// Pagination: walk the first two pages by token.
 	page0, err := s.handler.ListPets(ctx, connect.NewRequest(&petv1.ListPetsRequest{
 		PageSize: 1,
-		Page:     0,
 	}))
 	s.Require().NoError(err)
 	s.Len(page0.Msg.GetPets(), 1)
+	s.Require().NotEmpty(page0.Msg.GetNextPageToken())
 
 	page1, err := s.handler.ListPets(ctx, connect.NewRequest(&petv1.ListPetsRequest{
-		PageSize: 1,
-		Page:     1,
+		PageSize:  1,
+		PageToken: page0.Msg.GetNextPageToken(),
 	}))
 	s.Require().NoError(err)
 	s.Len(page1.Msg.GetPets(), 1)
@@ -390,4 +391,95 @@ func (s *PetHandlerTestSuite) TestUpdatePetRejectsAnUnknownMaskPath() {
 
 	s.Require().Error(err)
 	s.Equal(connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+// TestListPetsCursorSurvivesConcurrentInsert is the regression test for offset
+// paging. Before cursors, reading page 1, inserting a row that sorts first, then
+// reading page 2 served one pet twice and never served the new one.
+func (s *PetHandlerTestSuite) TestListPetsCursorSurvivesConcurrentInsert() {
+	ctx := s.authContext("lister@example.com")
+
+	for i := range 4 {
+		_, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+			Name: fmt.Sprintf("Pet%d", i), Species: "Dog",
+		}))
+		s.Require().NoError(err)
+	}
+
+	page := func(token string) ([]string, string, int32) {
+		resp, err := s.handler.ListPets(ctx, connect.NewRequest(&petv1.ListPetsRequest{
+			PageSize: 2, PageToken: token,
+		}))
+		s.Require().NoError(err)
+		names := make([]string, 0, len(resp.Msg.GetPets()))
+		for _, p := range resp.Msg.GetPets() {
+			names = append(names, p.GetName())
+		}
+		return names, resp.Msg.GetNextPageToken(), resp.Msg.GetTotalCount()
+	}
+
+	first, token, total := page("")
+	s.Require().Len(first, 2)
+	s.Require().NotEmpty(token)
+	s.Equal(int32(4), total, "total counts the filter, not the remainder after the cursor")
+
+	// A new pet arrives between the fetches. Ordered by created_at DESC it sorts
+	// first, which is exactly what shifted every OFFSET-based window.
+	_, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+		Name: "Newcomer", Species: "Dog",
+	}))
+	s.Require().NoError(err)
+
+	second, _, _ := page(token)
+
+	seen := map[string]bool{}
+	for _, n := range append(append([]string{}, first...), second...) {
+		s.False(seen[n], "%q was served on both pages", n)
+		seen[n] = true
+	}
+	s.Subset([]string{"Pet0", "Pet1", "Pet2", "Pet3"}, second,
+		"the second page must continue the original ordering, not re-slice it")
+}
+
+func (s *PetHandlerTestSuite) TestListPetsPaginatesToTheEnd() {
+	ctx := s.authContext("lister@example.com")
+
+	const seeded = 5
+	for i := range seeded {
+		_, err := s.handler.CreatePet(ctx, connect.NewRequest(&petv1.CreatePetRequest{
+			Name: fmt.Sprintf("Walk%d", i), Species: "Cat",
+		}))
+		s.Require().NoError(err)
+	}
+
+	var names []string
+	token := ""
+	for range seeded + 2 { // generous bound; the loop must exit on an empty token
+		resp, err := s.handler.ListPets(ctx, connect.NewRequest(&petv1.ListPetsRequest{
+			PageSize: 2, PageToken: token, Species: "Cat",
+		}))
+		s.Require().NoError(err)
+		for _, p := range resp.Msg.GetPets() {
+			names = append(names, p.GetName())
+		}
+		token = resp.Msg.GetNextPageToken()
+		if token == "" {
+			break
+		}
+	}
+
+	s.Empty(token, "walking the pages must terminate")
+	s.Len(names, seeded, "every pet seen exactly once")
+}
+
+func (s *PetHandlerTestSuite) TestListPetsRejectsTheDeprecatedPageField() {
+	ctx := s.authContext("lister@example.com")
+
+	//nolint:staticcheck // SA1019: sending the deprecated field is the thing under test.
+	req := connect.NewRequest(&petv1.ListPetsRequest{PageSize: 2, Page: 1})
+	_, err := s.handler.ListPets(ctx, req)
+
+	s.Require().Error(err)
+	s.Equal(connect.CodeInvalidArgument, connect.CodeOf(err))
+	s.Contains(err.Error(), "page_token")
 }

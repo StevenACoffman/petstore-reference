@@ -273,6 +273,24 @@ Startup refuses to proceed if authentication is enabled in production with neith
 
 ---
 
+## 📄 Pagination
+
+`ListPets` is cursor-paged. Pass `page_size`, read `next_page_token` from the
+response, and send it back as `page_token`; an empty token means the last page.
+
+Offset paging was removed because it is not consistent under concurrent writes: a
+row inserted between two fetches shifts the window, so one pet is served twice and
+another never at all. That was reproduced against a real database before the
+change, and the regression test replays it. Sending the deprecated `page` field is
+now rejected rather than silently honoured.
+
+The page and its `total_count` come from one query — `COUNT(*) OVER()` inside a CTE
+that carries the filters, so the total counts everything matching the filter rather
+than the remainder after the cursor — which also means page and count can no longer
+disagree the way two round trips could.
+
+---
+
 ## 🔑 Authorization
 
 Authentication establishes *who* you are; authorization decides *what you may do*.

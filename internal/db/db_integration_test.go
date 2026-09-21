@@ -181,22 +181,16 @@ func (s *DBTestSuite) TestPetQueries() {
 	s.Equal("Buddy", fetched.Name)
 	s.Equal([]string{"https://example.com/buddy.jpg"}, fetched.PhotoUrls)
 
-	// 3. CountPets & ListPets
-	count, err := queries.CountPets(s.ctx, db.CountPetsParams{
-		Species: pgtype.Text{String: "Dog", Valid: true},
-	})
-	s.Require().NoError(err)
-	s.Equal(int64(1), count)
-
+	// 3. ListPets carries its own total, so no second count query is needed.
 	pets, err := queries.ListPets(s.ctx, db.ListPetsParams{
-		Limit:   10,
-		Offset:  0,
-		Species: pgtype.Text{String: "Dog", Valid: true},
+		PageSize: 10,
+		Species:  pgtype.Text{String: "Dog", Valid: true},
 	})
 	s.Require().NoError(err)
 	s.Len(pets, 1)
 	s.Equal(created.ID, pets[0].ID)
 	s.Equal([]string{"https://example.com/buddy.jpg"}, pets[0].PhotoUrls)
+	s.Equal(int64(1), pets[0].TotalCount, "the window total counts the filter")
 
 	// 4. UpdatePet writes every column when every parameter is supplied.
 	updated, err := queries.UpdatePet(s.ctx, db.UpdatePetParams{

@@ -148,7 +148,8 @@ func (h *Handler) ListPets(
 	const op = "Handler.ListPets"
 	msg := req.Msg
 
-	limit, offset, err := pageBounds(msg.GetPage(), msg.GetPageSize())
+	// GetPage is read precisely so a non-zero value can be refused; see listBounds.
+	limit, cursorAt, cursorID, err := listBounds(msg.GetPageSize(), msg.GetPage(), msg.GetPageToken()) //nolint:staticcheck // SA1019: the deprecated field is read only to reject it.
 	if err != nil {
 		return nil, translate(ctx, op, err)
 	}
@@ -162,36 +163,37 @@ func (h *Handler) ListPets(
 		speciesParam = pgtype.Text{String: msg.GetSpecies(), Valid: true}
 	}
 
-	pets, err := query(ctx, h, func(c context.Context) ([]db.Pet, error) {
+	// One query yields the page and the total, from one snapshot, so they cannot
+	// disagree the way two round trips could.
+	rows, err := query(ctx, h, func(c context.Context) ([]db.ListPetsRow, error) {
 		return h.queries.ListPets(c, db.ListPetsParams{
-			Limit:   limit,
-			Offset:  offset,
-			Status:  statusParam,
-			Species: speciesParam,
+			// One extra row probes for a next page; splitPage trims it.
+			PageSize:        limit + 1,
+			CursorCreatedAt: cursorAt,
+			CursorID:        cursorID,
+			Status:          statusParam,
+			Species:         speciesParam,
 		})
 	})
 	if err != nil {
 		return nil, translate(ctx, op, err)
 	}
 
-	totalCount, err := query(ctx, h, func(c context.Context) (int64, error) {
-		return h.queries.CountPets(c, db.CountPetsParams{
-			Status:  statusParam,
-			Species: speciesParam,
-		})
-	})
-	if err != nil {
-		return nil, translate(ctx, op, err)
+	page, token := splitPage(rows, limit)
+	protoPets := make([]*petv1.Pet, len(page))
+	for i := range page {
+		protoPets[i] = toProtoPet(petFromListRow(page[i]))
 	}
-
-	protoPets := make([]*petv1.Pet, len(pets))
-	for i := range pets {
-		protoPets[i] = toProtoPet(pets[i])
+	// Every row carries the same window total; an empty page means nothing matched.
+	var total int64
+	if len(page) > 0 {
+		total = page[0].TotalCount
 	}
 
 	return connect.NewResponse(&petv1.ListPetsResponse{
-		Pets:       protoPets,
-		TotalCount: clampToInt32(totalCount),
+		Pets:          protoPets,
+		TotalCount:    clampToInt32(total),
+		NextPageToken: token,
 	}), nil
 }
 

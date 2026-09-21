@@ -76,32 +76,6 @@ func FuzzParseUUID(f *testing.F) {
 	})
 }
 
-// FuzzPageBounds asserts the range contract: an accepted page always produces a
-// limit within bounds and a non-negative offset, so no caller can coax the query
-// into an unbounded scan or a negative OFFSET.
-func FuzzPageBounds(f *testing.F) {
-	for _, seed := range [][2]int32{
-		{0, 0}, {1, 10}, {0, 10_000}, {-1, 10},
-		{21_474_837, 100}, {2_147_483_647, 2_147_483_647}, {0, -5},
-	} {
-		f.Add(seed[0], seed[1])
-	}
-
-	f.Fuzz(func(t *testing.T, page, pageSize int32) {
-		limit, offset, err := pageBounds(page, pageSize)
-		if err != nil {
-			return
-		}
-		if limit < 1 || limit > maxPageSize {
-			t.Fatalf("pageBounds(%d, %d) returned limit %d, outside [1, %d]",
-				page, pageSize, limit, maxPageSize)
-		}
-		if offset < 0 {
-			t.Fatalf("pageBounds(%d, %d) returned a negative offset %d", page, pageSize, offset)
-		}
-	})
-}
-
 // FuzzStatusFromDB asserts that no stored string can make the mapping panic, and
 // that anything unrecognised lands on UNSPECIFIED rather than an invented enum value.
 func FuzzStatusFromDB(f *testing.F) {

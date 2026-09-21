@@ -1,6 +1,7 @@
 package pet
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"math"
@@ -108,27 +109,6 @@ func parseUUID(field, value string) (pgtype.UUID, error) {
 		return pgtype.UUID{}, fmt.Errorf("%w: %s is not a valid UUID", errInvalid, field)
 	}
 	return uid, nil
-}
-
-// pageBounds converts a page number and size into LIMIT and OFFSET.
-//
-// Ensures: on success limit is in [1, maxPageSize] and offset is a non-negative
-// int32; on failure both are zero. Out-of-range input errors rather than truncating.
-func pageBounds(page, pageSize int32) (limit, offset int32, err error) {
-	limit = defaultPageSize
-	if pageSize > 0 {
-		limit = min(pageSize, maxPageSize)
-	}
-
-	if page < 0 {
-		return 0, 0, fmt.Errorf("%w: page cannot be negative", errInvalid)
-	}
-	// Compute in 64 bits so the overflow check itself cannot overflow.
-	wide := int64(page) * int64(limit)
-	if wide < 0 || wide > math.MaxInt32 {
-		return 0, 0, fmt.Errorf("%w: page offset is too large", errInvalid)
-	}
-	return limit, int32(wide), nil
 }
 
 // clampToInt32 narrows a count to int32, saturating rather than wrapping.
@@ -272,4 +252,107 @@ func orEmpty(values []string) []string {
 		return []string{}
 	}
 	return values
+}
+
+// cursorSeparator splits the two components of a page token.
+const cursorSeparator = "|"
+
+// encodeCursor builds the opaque page token identifying the last row of a page.
+//
+// The token is opaque by convention, not secret: it carries a timestamp and an id
+// the caller already holds, and forging one only reaches a page they could have
+// paged to anyway. It is not an authorization boundary.
+func encodeCursor(createdAt time.Time, id pgtype.UUID) string {
+	raw := createdAt.UTC().Format(time.RFC3339Nano) + cursorSeparator + uuid.UUID(id.Bytes).String()
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+// decodeCursor reverses encodeCursor. A malformed token wraps errInvalid, so a
+// caller pasting junk gets InvalidArgument rather than an internal error.
+func decodeCursor(token string) (createdAt time.Time, id pgtype.UUID, err error) {
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return time.Time{}, pgtype.UUID{}, fmt.Errorf("%w: page_token is not valid base64", errInvalid)
+	}
+
+	timestamp, rawID, found := strings.Cut(string(raw), cursorSeparator)
+	if !found {
+		return time.Time{}, pgtype.UUID{}, fmt.Errorf("%w: page_token is malformed", errInvalid)
+	}
+
+	createdAt, err = time.Parse(time.RFC3339Nano, timestamp)
+	if err != nil {
+		return time.Time{}, pgtype.UUID{}, fmt.Errorf("%w: page_token has an invalid timestamp", errInvalid)
+	}
+	if err := id.Scan(rawID); err != nil {
+		return time.Time{}, pgtype.UUID{}, fmt.Errorf("%w: page_token has an invalid id", errInvalid)
+	}
+
+	return createdAt, id, nil
+}
+
+// listBounds resolves a list request's paging inputs.
+//
+// Requires: page is the deprecated offset field; a non-zero value is refused
+// rather than honoured, because offset paging is what served rows twice.
+func listBounds(pageSize, page int32, pageToken string) (limit int32, cursor pgtype.Timestamptz, cursorID pgtype.UUID, err error) {
+	if page != 0 {
+		return 0, cursor, cursorID, fmt.Errorf(
+			"%w: page is no longer supported because offset paging skipped and repeated rows; use page_token",
+			errInvalid)
+	}
+
+	limit = defaultPageSize
+	if pageSize > 0 {
+		limit = min(pageSize, maxPageSize)
+	}
+	if pageToken == "" {
+		return limit, cursor, cursorID, nil
+	}
+
+	createdAt, id, err := decodeCursor(pageToken)
+	if err != nil {
+		return 0, cursor, cursorID, err
+	}
+	return limit, pgtype.Timestamptz{Time: createdAt, Valid: true}, id, nil
+}
+
+// petFromListRow drops the window's total_count so the row can share toProtoPet
+// with every other read.
+func petFromListRow(row db.ListPetsRow) db.Pet {
+	return db.Pet{
+		ID:                 row.ID,
+		Name:               row.Name,
+		Species:            row.Species,
+		BirthDate:          row.BirthDate,
+		BirthDateEstimated: row.BirthDateEstimated,
+		Status:             row.Status,
+		Tags:               row.Tags,
+		CreatedAt:          row.CreatedAt,
+		ModifiedAt:         row.ModifiedAt,
+		CreatedBy:          row.CreatedBy,
+		ModifiedBy:         row.ModifiedBy,
+		PhotoUrls:          row.PhotoUrls,
+	}
+}
+
+// splitPage trims the extra row fetched to probe for a next page, and returns the
+// token to reach it.
+//
+// The query asks for limit+1 rows. Getting them back is how we know another page
+// exists without a second query, and it means a final page that happens to be
+// exactly full does not hand the caller an empty page whose total_count would
+// be unknowable.
+//
+// Requires: limit > 0; rows holds at most limit+1 entries.
+// Ensures:  the returned slice holds at most limit rows; the token is empty
+//
+//	exactly when no further rows exist.
+func splitPage(rows []db.ListPetsRow, limit int32) (page []db.ListPetsRow, nextToken string) {
+	if len(rows) <= int(limit) {
+		return rows, ""
+	}
+	page = rows[:limit]
+	last := page[len(page)-1]
+	return page, encodeCursor(last.CreatedAt.Time, last.ID)
 }

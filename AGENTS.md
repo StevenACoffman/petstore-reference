@@ -106,6 +106,12 @@ and if `Ensures` enumerates cases it does too much.
 - Schema changes are goose migrations in `sql/schema/`. After changing them, refresh
   the snapshot and read the diff:
   `go test -tags=integration -run TestSchemaGolden ./internal/db/ -update`
+- `ListPets` is cursor-paged on `(created_at, id)`. Do not reintroduce OFFSET: it
+  serves rows twice under concurrent inserts. Row-value comparison
+  `(created_at, id) < ($1, $2)`, not `created_at <= $1 AND id < $2`, which is a
+  different predicate.
+- A list query returns its own total via `COUNT(*) OVER()` inside a CTE holding the
+  filters. Outside the CTE it would count the post-cursor remainder instead.
 - Transactions never appear in a service method's signature.
   `defer tx.Rollback(ctx)` immediately after a successful `Begin`.
 - Every database call goes through one of two helpers in `internal/pet/handler.go`:

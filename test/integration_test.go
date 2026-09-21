@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -255,27 +256,34 @@ func (s *PetServiceIntegrationTestSuite) TestFilteringAndPagination() {
 	s.Equal(int32(3), availResp.Msg.GetTotalCount())
 	s.Len(availResp.Msg.GetPets(), 3)
 
-	// Pagination: pageSize=2, page=0
-	page0Req := connect.NewRequest(&petv1.ListPetsRequest{
-		PageSize: 2,
-		Page:     0,
-	})
-	page0Req.Header().Set("Authorization", "Bearer test-token")
-	page0Resp, err := s.client.ListPets(s.ctx, page0Req)
-	s.Require().NoError(err)
-	s.Equal(int32(5), page0Resp.Msg.GetTotalCount())
-	s.Len(page0Resp.Msg.GetPets(), 2)
+	// Pagination: walk all five pets two at a time, following the tokens.
+	var seen []string
+	token := ""
+	for range 5 {
+		req := connect.NewRequest(&petv1.ListPetsRequest{PageSize: 2, PageToken: token})
+		req.Header().Set("Authorization", "Bearer test-token")
+		resp, listErr := s.client.ListPets(s.ctx, req)
+		s.Require().NoError(listErr)
+		s.Equal(int32(5), resp.Msg.GetTotalCount(), "the total is the filter, every page")
+		for _, p := range resp.Msg.GetPets() {
+			seen = append(seen, p.GetId())
+		}
+		token = resp.Msg.GetNextPageToken()
+		if token == "" {
+			break
+		}
+	}
+	s.Empty(token, "walking the pages must terminate")
+	s.Len(seen, 5)
+	s.Len(slices.Compact(slices.Sorted(slices.Values(seen))), 5, "no pet served twice")
 
-	// Pagination: pageSize=2, page=2 (should return 1 pet)
-	page2Req := connect.NewRequest(&petv1.ListPetsRequest{
-		PageSize: 2,
-		Page:     2,
-	})
-	page2Req.Header().Set("Authorization", "Bearer test-token")
-	page2Resp, err := s.client.ListPets(s.ctx, page2Req)
-	s.Require().NoError(err)
-	s.Equal(int32(5), page2Resp.Msg.GetTotalCount())
-	s.Len(page2Resp.Msg.GetPets(), 1)
+	// The deprecated offset field is refused rather than silently honoured.
+	//nolint:staticcheck // SA1019: sending the deprecated field is the thing under test.
+	pageReq := connect.NewRequest(&petv1.ListPetsRequest{PageSize: 2, Page: 1})
+	pageReq.Header().Set("Authorization", "Bearer test-token")
+	_, pageErr := s.client.ListPets(s.ctx, pageReq)
+	s.Require().Error(pageErr)
+	s.Equal(connect.CodeInvalidArgument, connect.CodeOf(pageErr))
 }
 
 // TRUNCATE between them; running it in parallel would make failures ambiguous.

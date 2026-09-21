@@ -16,17 +16,33 @@ import (
 // covered in core_test.go; what matters here is that the shell translates a core
 // failure into the right RPC code rather than letting it reach the database.
 
-func TestListPetsRejectsAnOverflowingPageOffset(t *testing.T) {
+// The deprecated offset field is refused at the shell, before the nil pool would
+// otherwise turn it into Unavailable — so the caller learns what to change.
+func TestListPetsRejectsTheDeprecatedPageField(t *testing.T) {
 	t.Parallel()
 
 	handler := NewHandler(nil)
-	req := connect.NewRequest(&petv1.ListPetsRequest{PageSize: 100, Page: 21_474_837})
+	//nolint:staticcheck // SA1019: sending the deprecated field is the thing under test.
+	req := connect.NewRequest(&petv1.ListPetsRequest{PageSize: 10, Page: 1})
+
+	_, err := handler.ListPets(context.Background(), req)
+
+	require.Error(t, err)
+	assert.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+	assert.Contains(t, err.Error(), "page_token")
+}
+
+func TestListPetsRejectsAMalformedPageToken(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(nil)
+	req := connect.NewRequest(&petv1.ListPetsRequest{PageToken: "not-a-token"})
 
 	_, err := handler.ListPets(context.Background(), req)
 
 	require.Error(t, err)
 	assert.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err),
-		"an out-of-range page is the caller's mistake, not an internal error")
+		"a bad token is the caller's mistake, not an internal error")
 }
 
 func TestHandlerRejectsMalformedUUIDs(t *testing.T) {

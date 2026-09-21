@@ -1667,6 +1667,10 @@ func (x *ListPetsRequest) marshalProtoJSONXTo(e *protojsonxgen.Encoder) error {
 		e.FieldPrefix(&wrote, "page")
 		e.Int32(x.Page)
 	}
+	if x.PageToken != "" {
+		e.FieldPrefix(&wrote, "pageToken")
+		e.String(x.PageToken)
+	}
 	e.Byte('}')
 	return nil
 }
@@ -1766,6 +1770,27 @@ func (x *ListPetsRequest) unmarshalProtoJSONXFast(d *protojsonxgen.Decoder, disc
 			x.Page = v
 		}
 	}
+	{
+		status, err := d.MatchFast(&fastFirst, "pageToken")
+		if err != nil {
+			return false, err
+		}
+		if status == 0 {
+			return true, nil
+		}
+		if status < 0 {
+			return false, nil
+		}
+		if d.ReadNull() {
+			x.PageToken = ""
+		} else {
+			v, err := d.ReadString()
+			if err != nil {
+				return false, err
+			}
+			x.PageToken = v
+		}
+	}
 	done, err := d.TryEndObject()
 	if err != nil {
 		return false, err
@@ -1780,7 +1805,7 @@ func (x *ListPetsRequest) unmarshalProtoJSONXFrom(d *protojsonxgen.Decoder, disc
 	if err := d.BeginObject(); err != nil {
 		return err
 	}
-	var seen [4]bool
+	var seen [5]bool
 	first := true
 	for {
 		key, ok, err := d.NextObjectKey(&first)
@@ -1855,6 +1880,21 @@ func (x *ListPetsRequest) unmarshalProtoJSONXFrom(d *protojsonxgen.Decoder, disc
 					return err
 				}
 				x.Page = v
+			}
+			continue
+		case "pageToken", "page_token":
+			if seen[4] {
+				return protojsonxgen.DuplicateField(key)
+			}
+			seen[4] = true
+			if d.ReadNull() {
+				x.PageToken = ""
+			} else {
+				v, err := d.ReadString()
+				if err != nil {
+					return err
+				}
+				x.PageToken = v
 			}
 			continue
 		default:
@@ -1938,6 +1978,10 @@ func (x *ListPetsResponse) marshalProtoJSONXTo(e *protojsonxgen.Encoder) error {
 		e.FieldPrefix(&wrote, "totalCount")
 		e.Int32(x.TotalCount)
 	}
+	if x.NextPageToken != "" {
+		e.FieldPrefix(&wrote, "nextPageToken")
+		e.String(x.NextPageToken)
+	}
 	e.Byte('}')
 	return nil
 }
@@ -2020,6 +2064,27 @@ func (x *ListPetsResponse) unmarshalProtoJSONXFast(d *protojsonxgen.Decoder, dis
 			x.TotalCount = v
 		}
 	}
+	{
+		status, err := d.MatchFast(&fastFirst, "nextPageToken")
+		if err != nil {
+			return false, err
+		}
+		if status == 0 {
+			return true, nil
+		}
+		if status < 0 {
+			return false, nil
+		}
+		if d.ReadNull() {
+			x.NextPageToken = ""
+		} else {
+			v, err := d.ReadString()
+			if err != nil {
+				return false, err
+			}
+			x.NextPageToken = v
+		}
+	}
 	done, err := d.TryEndObject()
 	if err != nil {
 		return false, err
@@ -2034,7 +2099,7 @@ func (x *ListPetsResponse) unmarshalProtoJSONXFrom(d *protojsonxgen.Decoder, dis
 	if err := d.BeginObject(); err != nil {
 		return err
 	}
-	var seen [2]bool
+	var seen [3]bool
 	first := true
 	for {
 		key, ok, err := d.NextObjectKey(&first)
@@ -2102,6 +2167,21 @@ func (x *ListPetsResponse) unmarshalProtoJSONXFrom(d *protojsonxgen.Decoder, dis
 					return err
 				}
 				x.TotalCount = v
+			}
+			continue
+		case "nextPageToken", "next_page_token":
+			if seen[2] {
+				return protojsonxgen.DuplicateField(key)
+			}
+			seen[2] = true
+			if d.ReadNull() {
+				x.NextPageToken = ""
+			} else {
+				v, err := d.ReadString()
+				if err != nil {
+					return err
+				}
+				x.NextPageToken = v
 			}
 			continue
 		default:

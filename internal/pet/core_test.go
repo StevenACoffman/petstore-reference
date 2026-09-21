@@ -187,53 +187,6 @@ func TestParseUUID(t *testing.T) {
 	})
 }
 
-func TestPageBounds(t *testing.T) {
-	t.Parallel()
-
-	// The expectations are written as literals on purpose. Using defaultPageSize or
-	// maxPageSize here would make the test move with the constant it is meant to
-	// pin, so changing 20 to 21 would still pass — mutation testing caught exactly
-	// that.
-	cases := map[string]struct {
-		page, pageSize        int32
-		wantLimit, wantOffset int32
-		wantErr               bool
-	}{
-		"defaults to 20 when no size is given": {0, 0, 20, 0, false},
-		"honours an explicit size":             {0, 50, 50, 0, false},
-		"offsets by page times size":           {3, 10, 10, 30, false},
-		"page zero starts at offset zero":      {0, 10, 10, 0, false},
-		"page one starts one page in":          {1, 10, 10, 10, false},
-		"caps an oversized page size at 200":   {0, 10_000, 200, 0, false},
-		"a page size of exactly 200 is kept":   {0, 200, 200, 0, false},
-		"a page size of 201 is capped to 200":  {0, 201, 200, 0, false},
-		"a negative page size falls back":      {0, -1, 20, 0, false},
-		"a page size of one is honoured":       {0, 1, 1, 0, false},
-		"rejects a negative page":              {-1, 10, 0, 0, true},
-		"rejects an overflowing offset":        {21_474_837, 100, 0, 0, true},
-	}
-
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			limit, offset, err := pageBounds(tc.page, tc.pageSize)
-
-			if tc.wantErr {
-				require.ErrorIs(t, err, errInvalid)
-				// The failure path must not hand back a usable-looking bound; a
-				// caller that ignored the error would otherwise get a real query.
-				assert.Zero(t, limit, "limit must be zero on failure")
-				assert.Zero(t, offset, "offset must be zero on failure")
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tc.wantLimit, limit)
-			assert.Equal(t, tc.wantOffset, offset)
-		})
-	}
-}
-
 func TestClampToInt32(t *testing.T) {
 	t.Parallel()
 
