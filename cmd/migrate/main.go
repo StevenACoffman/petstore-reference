@@ -18,8 +18,7 @@ const (
 )
 
 func main() {
-	// os.Exit is called from a frame that holds no defers, so migrate()'s cleanup —
-	// closing the pool, releasing the signal handler — runs first.
+	// This frame holds no defers, so migrate()'s cleanup all runs before the exit.
 	os.Exit(migrate())
 }
 

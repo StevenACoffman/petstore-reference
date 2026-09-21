@@ -20,29 +20,19 @@ import (
 )
 
 const (
-	// shutdownTimeout bounds how long in-flight requests may take to drain once a
-	// termination signal arrives.
+	// shutdownTimeout for in-flight requests to drain.
 	shutdownTimeout = 10 * time.Second
-	// otelShutdownTimeout bounds the final trace flush.
+	// otelShutdownTimeout for the final trace flush.
 	otelShutdownTimeout = 5 * time.Second
-	// readHeaderTimeout bounds how long a client may take to send request headers,
-	// which is the cheap defence against Slowloris.
+	// readHeaderTimeout is the cheap defence against Slowloris.
 	readHeaderTimeout = 5 * time.Second
 )
 
 // run wires the service and serves until ctx is cancelled.
 //
-// Every OS facility the service touches arrives as a parameter, so a test can call
-// run directly with a fake environment and captured output instead of starting a
-// process. run never calls os.Exit; it returns an error and lets main decide.
-//
-// Requires: args is non-empty (args[0] is the program name); getenv behaves like
-//
-//	os.Getenv; stdout and stderr are non-nil.
-//
-// Ensures: the HTTP listener and database pool are closed before returning, whether
-//
-//	the exit is clean or an error.
+// Every OS facility arrives as a parameter, so a test can drive run directly with a
+// fake environment instead of starting a process. It never calls os.Exit, and
+// closes the listener and pool on every path out.
 func run(
 	ctx context.Context,
 	args []string,
@@ -72,8 +62,8 @@ func run(
 		logger.Warn("telemetry config file unusable, continuing with environment settings", "error", err)
 	}
 
-	// Metrics come first: otelconnect and otelhttp resolve the global MeterProvider
-	// when their interceptors are built, so it must exist before the handler is wired.
+	// Metrics first: otelconnect resolves the global MeterProvider when its
+	// interceptor is built, so it must already exist.
 	var metricsHandler http.Handler
 	if res, resErr := telemetry.NewResource(ctx, otelCfg); resErr != nil {
 		logger.Warn("building telemetry resource", "error", resErr)
@@ -94,9 +84,8 @@ func run(
 		logger.Warn("opentelemetry init failed", "error", otelErr)
 	} else {
 		defer func() {
-			// WithoutCancel, not Background: the parent context is already cancelled by
-			// the time this runs, but the final trace flush should still carry the
-			// service's trace context.
+			// WithoutCancel, not Background: ctx is already cancelled, but the flush
+			// should still carry the service's trace context.
 			shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), otelShutdownTimeout)
 			defer cancel()
 			if flushErr := shutdownOTel(shutdownCtx); flushErr != nil {
@@ -128,8 +117,7 @@ func run(
 		return fmt.Errorf("building server handler: %w", handlerErr)
 	}
 
-	// The admin surface is a separate listener: metrics and pprof must not be
-	// reachable on the public port. See admin.go.
+	// Separate listener: metrics and pprof must not reach the public port.
 	adminErrCh := make(chan error, 1)
 	if cfg.AdminEnabled() {
 		admin, adminErr := newAdminServer(ctx, logger, cfg.AdminAddr, cfg.TraceSnapshotDir, metricsHandler)
@@ -190,8 +178,7 @@ func run(
 		"url", fmt.Sprintf("%s://%s", scheme, listener.Addr()),
 		"tls", useTLS,
 	)
-	// The resolved address goes to stdout so a supervising test can discover the
-	// port when it asked for :0.
+	// Resolved address to stdout, so a test that asked for :0 can find the port.
 	fmt.Fprintf(stdout, "listening on %s://%s\n", scheme, listener.Addr())
 
 	serveErr := make(chan error, 1)
@@ -218,8 +205,8 @@ func run(
 	}
 
 	logger.Info("shutting down pet microservice")
-	// WithoutCancel: ctx is already cancelled, but in-flight requests should still be
-	// given shutdownTimeout to drain, and their spans should stay attached.
+	// WithoutCancel: ctx is cancelled, but in-flight requests still get
+	// shutdownTimeout to drain.
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -233,8 +220,8 @@ func run(
 	return nil
 }
 
-// tlsFiles reports the certificate pair to serve with, and whether both are present.
-// A missing pair is not an error: local development without mkcert serves cleartext.
+// tlsFiles reports the certificate pair, if both exist. A missing pair is not an
+// error: local development without mkcert serves cleartext.
 func tlsFiles(cfg *config.Config) (certFile, keyFile string, ok bool) {
 	if cfg.CertFile == "" || cfg.KeyFile == "" {
 		return "", "", false

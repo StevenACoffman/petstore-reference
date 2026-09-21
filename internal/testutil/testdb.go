@@ -16,18 +16,11 @@ import (
 	"github.com/example/pets/internal/db"
 )
 
-// configureDockerHost points testcontainers at a Colima socket on macOS when the
-// caller has not already chosen a Docker endpoint.
+// configureDockerHost points testcontainers at a Colima socket on macOS, unless
+// the caller already chose an endpoint or no socket exists.
 //
-// This runs from StartTestDB rather than from init() for two reasons: init() runs
-// unconditionally in every binary that links this package, and its effect on the
-// process environment cannot be suppressed or reset by a test. sync.Once keeps the
-// environment writes to a single goroutine even when suites start concurrently.
-//
-// Requires: nothing.
-// Ensures:  DOCKER_HOST and TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE are left untouched
-//
-//	when already set, or when no Colima socket is present.
+// Called from StartTestDB rather than init(): init() runs in every binary linking
+// this package and a test cannot suppress its effect on the environment.
 func configureDockerHost() {
 	dockerHostOnce.Do(func() {
 		if os.Getenv("DOCKER_HOST") != "" {

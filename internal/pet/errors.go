@@ -23,9 +23,8 @@ const (
 	sqlStateDeadlockDetected    = "40P01"
 )
 
-// Messages sent to clients. They deliberately say less than the underlying error:
-// the detail goes to the log, where operators can see it, rather than to a caller
-// who may be untrusted.
+// Client-facing messages. They say less than the underlying error: detail goes to
+// the log, not to a caller who may be untrusted.
 var (
 	errNotFound      = errors.New("not found")
 	errAlreadyExists = errors.New("already exists")
@@ -36,15 +35,9 @@ var (
 	errUnauthClaims  = errors.New("authenticated identity has no email")
 )
 
-// translate converts an error from the core or the database into the Connect error a
-// client should see.
-//
-// This is the implementation boundary: no pgx or pgconn error escapes past it, and
-// no raw database text reaches a caller. Anything unrecognised becomes Internal and
-// is logged with its op so the cause is still recoverable from the logs.
-//
-// Requires: op names the operation in "Type.Method" form, for the log line.
-// Ensures:  returns nil when err is nil; otherwise a *connect.Error.
+// translate converts a core or database error into the Connect error a client
+// should see. No pgx or pgconn error escapes past here; anything unrecognised
+// becomes Internal and is logged with op so the cause stays recoverable.
 func translate(ctx context.Context, op string, err error) error {
 	if err == nil {
 		return nil
@@ -54,12 +47,9 @@ func translate(ctx context.Context, op string, err error) error {
 	if errors.Is(err, errInvalid) {
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	// An open circuit breaker, or a handler with no pool at all, means the request
-	// was never attempted. Unavailable is what tells a well-behaved client to back
-	// off and retry later; reporting Internal here would make a transient outage
-	// look like a bug in the service and suppress the retry the breaker is asking
-	// for. This branch comes first because these errors carry no SQLSTATE and would
-	// otherwise fall through to the catch-all.
+	// The request was never attempted. Unavailable tells a client to retry;
+	// Internal would make a transient outage look like a bug and suppress the retry
+	// the breaker is asking for. First, because these carry no SQLSTATE.
 	if errors.Is(err, resilience.ErrUnavailable) || errors.Is(err, errNoDatabase) {
 		slog.WarnContext(ctx, "request rejected before reaching the database",
 			"op", op, "error", err)
@@ -81,8 +71,7 @@ func translate(ctx context.Context, op string, err error) error {
 	return connect.NewError(connect.CodeInternal, errInternal)
 }
 
-// connectCodeForSQLState maps a SQLSTATE onto an RPC code, returning CodeInternal
-// for anything the service does not model.
+// connectCodeForSQLState maps a SQLSTATE onto an RPC code, Internal if unmodelled.
 func connectCodeForSQLState(sqlState string) connect.Code {
 	switch sqlState {
 	case sqlStateUniqueViolation:
@@ -97,7 +86,7 @@ func connectCodeForSQLState(sqlState string) connect.Code {
 	}
 }
 
-// messageForSQLState returns the client-facing message for a modelled SQLSTATE.
+// messageForSQLState is the client-facing message for a modelled SQLSTATE.
 func messageForSQLState(sqlState string) error {
 	switch sqlState {
 	case sqlStateUniqueViolation:

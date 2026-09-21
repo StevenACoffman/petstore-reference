@@ -7,13 +7,8 @@ import (
 	"strings"
 )
 
-// ParseLevel maps a configured level name onto a slog.Level.
-//
-// Requires: name is a level name in any case, or "" .
-// Ensures:  returns the matching level, or slog.LevelInfo for an empty or
-//
-//	unrecognised name. Never fails — an operator typo degrades to the
-//	default level rather than preventing the process from starting.
+// ParseLevel maps a level name onto a slog.Level, defaulting to Info. An operator
+// typo degrades to the default rather than stopping the process.
 func ParseLevel(name string) slog.Level {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "debug":
@@ -27,17 +22,9 @@ func ParseLevel(name string) slog.Level {
 	}
 }
 
-// New builds a slog.Logger writing to w.
-//
-// A format of "json" selects slog's JSON handler, which is what production log
-// collectors want; anything else selects the human-readable text handler. The
-// handler is wrapped so records logged with a context carry trace correlation ids;
-// see WithTraceContext.
-//
-// Requires: w is non-nil.
-// Ensures:  returns a non-nil logger and mutates no global state — callers decide
-//
-//	whether to install it with slog.SetDefault.
+// New builds a logger writing to w: "json" for collectors, anything else for
+// humans. The handler is wrapped for trace correlation; see WithTraceContext.
+// Mutates no global state — the caller decides whether to slog.SetDefault it.
 func New(w io.Writer, level, format string) *slog.Logger {
 	opts := &slog.HandlerOptions{Level: ParseLevel(level)}
 
@@ -47,7 +34,6 @@ func New(w io.Writer, level, format string) *slog.Logger {
 	} else {
 		handler = slog.NewTextHandler(w, opts)
 	}
-	// Every record logged with a context inside a span carries that span's ids, so
-	// logs and traces can be joined on trace_id.
+
 	return slog.New(WithTraceContext(handler))
 }

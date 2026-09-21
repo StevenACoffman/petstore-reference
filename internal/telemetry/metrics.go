@@ -16,30 +16,19 @@ import (
 
 // Metrics holds the metric pipeline and the handler that exposes it.
 type Metrics struct {
-	// Handler serves the Prometheus scrape endpoint.
-	Handler http.Handler
-	// Shutdown flushes and stops the meter provider.
-	Shutdown func(context.Context) error
+	Handler  http.Handler                // the Prometheus scrape endpoint
+	Shutdown func(context.Context) error // flushes and stops the provider
 }
 
-// InitMetrics installs a global MeterProvider backed by a Prometheus exporter and
-// returns the handler that exposes it.
+// InitMetrics installs a global MeterProvider backed by Prometheus and returns the
+// handler exposing it.
 //
-// Installing the provider globally is what gives the service its RED metrics without
-// any per-handler instrumentation: otelconnect already records request counts,
-// durations, and error codes for every RPC, and otelhttp does the same for the photo
-// endpoint. Both resolve the global provider, and both stay no-ops until one exists.
-// Duration is recorded as a histogram, so p50/p95/p99 are queryable rather than only
-// the mean — §14 asks for percentiles because tail latency is what users feel.
+// Installing it globally is what gives the service RED metrics for free:
+// otelconnect already records rate, errors and duration per RPC, and stays a no-op
+// until a provider exists. Duration is a histogram, so p50/p95/p99 are queryable
+// rather than only the mean. The Go and process collectors add saturation.
 //
-// The Go and process collectors supply the saturation signal (goroutines, heap, GC,
-// file descriptors) to sit alongside rate, errors, and duration.
-//
-// Requires: res describes this service. Pass the same resource the tracer uses so
-//
-//	metrics and traces carry matching service attributes.
-//
-// Ensures: on success the global MeterProvider is installed and Handler is non-nil.
+// Pass the same resource the tracer uses, so metrics and traces match.
 func InitMetrics(res *resource.Resource) (*Metrics, error) {
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(

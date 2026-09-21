@@ -15,9 +15,8 @@ import (
 	"github.com/example/pets/internal/resilience"
 )
 
-// This file is the imperative shell: it opens transactions, runs queries, and turns
-// their results into responses. Every decision it makes — what is valid, what a value
-// means, how a row becomes a message — is delegated to the pure core in core.go.
+// This file is the imperative shell: queries in, responses out. Every decision is
+// delegated to the pure core in core.go.
 
 // Handler serves the PetService RPCs.
 type Handler struct {
@@ -31,11 +30,9 @@ var _ petv1connect.PetServiceHandler = (*Handler)(nil)
 
 // NewHandler builds a Handler over the given pool.
 //
-// A nil pool is accepted so the routing table can be constructed without a
-// database — cmd/server builds the whole mux that way in its routing tests. Every
-// RPC on such a handler answers Unavailable; none of them panics. That guarantee is
-// enforced in one place, by query and exec below, and asserted by
-// TestHandlerWithoutADatabase.
+// A nil pool is accepted so the routing table can be built without a database.
+// Every RPC then answers Unavailable rather than panicking — enforced by query and
+// exec below, asserted by TestHandlerWithoutADatabase.
 func NewHandler(pool *pgxpool.Pool) *Handler {
 	h := &Handler{}
 	if pool != nil {
@@ -57,15 +54,12 @@ func (h *Handler) WithResilience(policies *resilience.DB) *Handler {
 	return &clone
 }
 
-// errNoDatabase is returned when a handler was built without a pool. It is not a
-// condition a deployed service reaches — run() always supplies a pool — but
-// answering Unavailable beats panicking if one ever does.
+// errNoDatabase marks a handler built without a pool. run() always supplies one,
+// but answering Unavailable beats panicking if that ever changes.
 var errNoDatabase = errors.New("database is not configured")
 
-// query runs an idempotent read under the retry and circuit-breaker policies.
-//
-// Requires: op is idempotent; it may be invoked more than once.
-// Ensures:  returns errNoDatabase without invoking op when no pool was supplied.
+// query runs an idempotent read under retry and the breaker. op may run more than
+// once.
 func query[T any](ctx context.Context, h *Handler, op func(context.Context) (T, error)) (T, error) {
 	var zero T
 	if h.queries == nil {
@@ -74,15 +68,10 @@ func query[T any](ctx context.Context, h *Handler, op func(context.Context) (T, 
 	return resilience.Read(ctx, h.resilientDB, op)
 }
 
-// exec runs a non-idempotent write under the circuit breaker alone.
-//
-// Writes are never retried: replaying one that may already have committed is worse
-// than surfacing the error, and there is no idempotency key to make a replay safe.
-// They still go through the breaker so an outage fails fast instead of queueing on
-// the connection pool, and so a failing write helps open it.
-//
-// Requires: op has side effects; it is invoked at most once.
-// Ensures:  returns errNoDatabase without invoking op when no pool was supplied.
+// exec runs a write under the breaker alone, at most once. Writes are never
+// retried: replaying one that may already have committed is worse than surfacing
+// the error. The breaker still applies, so an outage fails fast and a failing write
+// helps open it.
 func exec[T any](ctx context.Context, h *Handler, op func(context.Context) (T, error)) (T, error) {
 	var zero T
 	if h.queries == nil {
@@ -91,7 +80,7 @@ func exec[T any](ctx context.Context, h *Handler, op func(context.Context) (T, e
 	return resilience.Write(ctx, h.resilientDB, op)
 }
 
-// callerEmail reads the authenticated identity that audit columns record.
+// callerEmail reads the identity the audit columns record.
 func callerEmail(ctx context.Context) (string, error) {
 	email, ok := auth.UserEmailFromContext(ctx)
 	if !ok {

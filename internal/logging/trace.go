@@ -13,24 +13,19 @@ const (
 	SpanIDKey  = "span_id"
 )
 
-// traceHandler copies the active trace and span ids onto every record.
+// traceHandler copies the active trace and span ids onto every record, making the
+// trace id the join key between logs and traces.
 //
-// Without this, logs and traces are two disconnected stores: an operator looking at
-// a slow trace has no way to find the log lines it produced, and vice versa. With
-// it, the trace id is the join key between them.
-//
-// It only works for the *Context variants — slog.InfoContext, ErrorContext, and so
-// on — because a plain slog.Info call has no context to read the span from.
+// Only the *Context variants carry a span; a plain slog.Info cannot.
 type traceHandler struct {
 	inner slog.Handler
 }
 
-// Enabled reports whether the inner handler wants records at this level.
 func (h traceHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.inner.Enabled(ctx, level)
 }
 
-// Handle annotates the record with the active span's identifiers, when there is one.
+// Handle adds the active span's identifiers, when there is one.
 func (h traceHandler) Handle(ctx context.Context, record slog.Record) error {
 	if spanCtx := trace.SpanContextFromContext(ctx); spanCtx.IsValid() {
 		record.AddAttrs(
@@ -41,29 +36,20 @@ func (h traceHandler) Handle(ctx context.Context, record slog.Record) error {
 	return h.inner.Handle(ctx, record)
 }
 
-// WithAttrs must rewrap, or the decoration would be dropped by a logger built with
-// slog.With.
+// WithAttrs must rewrap, or slog.With would drop the decoration.
 func (h traceHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return traceHandler{inner: h.inner.WithAttrs(attrs)}
 }
 
-// WithGroup must rewrap, for the same reason as WithAttrs.
-//
-// Note that slog applies the open group to every attribute a record carries, so a
-// logger derived with WithGroup("req") emits the ids at req.trace_id rather than at
-// the top level. This service does not use groups on its service loggers, which
-// keeps trace_id at the top level where log collectors expect it.
+// WithGroup must rewrap, as WithAttrs does. Note that slog nests every attribute
+// under an open group, so ids land at req.trace_id rather than the top level; this
+// service does not group its service loggers.
 func (h traceHandler) WithGroup(name string) slog.Handler {
 	return traceHandler{inner: h.inner.WithGroup(name)}
 }
 
-// WithTraceContext wraps a handler so that records logged inside a span carry that
-// span's trace and span ids.
-//
-// Requires: inner is non-nil.
-// Ensures:  the returned handler delegates every decision to inner and only adds
-//
-//	attributes; it never suppresses or rewrites a record.
+// WithTraceContext wraps inner so records logged inside a span carry its ids. It
+// only adds attributes, never suppressing or rewriting a record.
 func WithTraceContext(inner slog.Handler) slog.Handler {
 	return traceHandler{inner: inner}
 }

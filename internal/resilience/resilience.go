@@ -1,13 +1,10 @@
-// Package resilience holds the failure-handling policies that sit between the
-// service and the resources it depends on: retries, a circuit breaker, and an
-// admission rate limit.
+// Package resilience holds the database-facing failure policies: retries, a
+// circuit breaker, an admission rate limit, and a request deadline.
 //
-// The policies are deliberately narrow. Retrying is only safe for failures that are
-// known to be transient and known not to have applied, so the retry predicate names
-// specific PostgreSQL SQLSTATEs rather than retrying every error. The circuit breaker
-// exists so that a database outage fails fast with Unavailable instead of parking
-// every request on a connection-pool wait, which is how one slow dependency turns
-// into a service-wide stall.
+// The retry predicate names specific SQLSTATEs rather than retrying everything,
+// because a replay is only safe for a failure known not to have applied. The
+// breaker exists so an outage fails fast instead of parking every request on a
+// connection-pool wait.
 package resilience
 
 import (
@@ -23,11 +20,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// PostgreSQL SQLSTATEs that describe a transient, safely retryable failure.
-//
-// Serialization failures and deadlocks mean the transaction was rolled back and
-// never applied, so replaying it cannot double-apply anything. Connection-class
-// errors (08xxx) mean the statement never reached a live backend.
+// SQLSTATEs that are transient and safe to replay: serialization failures and
+// deadlocks rolled the transaction back, and 08xxx never reached a backend.
 const (
 	sqlStateSerializationFailure = "40001"
 	sqlStateDeadlockDetected     = "40P01"
@@ -38,22 +32,17 @@ const (
 
 // Config tunes the database-facing policies.
 type Config struct {
-	// MaxRetries is how many times a transient failure is replayed. Zero disables
-	// retrying.
+	// MaxRetries replays of a transient failure; zero disables retrying.
 	MaxRetries int
-	// BaseDelay is the first backoff interval; each retry multiplies it.
-	BaseDelay time.Duration
-	// MaxDelay caps the backoff interval.
-	MaxDelay time.Duration
-	// JitterFactor randomises each delay by this fraction, so that a fleet of
-	// instances recovering from the same outage does not retry in lockstep.
+	BaseDelay  time.Duration
+	MaxDelay   time.Duration
+	// JitterFactor keeps a recovering fleet from retrying in lockstep.
 	JitterFactor float64
-	// FailureThreshold is how many consecutive failures open the breaker.
+	// FailureThreshold consecutive failures open the breaker, SuccessThreshold
+	// consecutive successes close it, and OpenDelay is how long it stays open.
 	FailureThreshold uint
-	// SuccessThreshold is how many consecutive successes close it again.
 	SuccessThreshold uint
-	// OpenDelay is how long the breaker stays open before probing with a trial call.
-	OpenDelay time.Duration
+	OpenDelay        time.Duration
 }
 
 // DefaultConfig returns policy settings suited to a local PostgreSQL dependency.
@@ -73,28 +62,18 @@ func DefaultConfig() Config {
 // without being attempted.
 var ErrUnavailable = errors.New("dependency unavailable")
 
-// DB applies the database-facing policies to an operation.
-//
-// Reads and writes get different policies but share one breaker. The shared
-// breaker is the point: a write failing during an outage must count towards
-// opening it, and once open it must reject reads and writes alike.
+// DB applies the database policies. Reads and writes differ but share one
+// breaker: a failing write must help open it, and once open it must reject both.
 type DB struct {
-	// query retries transient failures, then consults the breaker.
-	query failsafe.Executor[any]
-	// exec consults the breaker but never retries — see NewDB.
-	exec    failsafe.Executor[any]
+	query   failsafe.Executor[any] // retry, then breaker
+	exec    failsafe.Executor[any] // breaker only
 	breaker circuitbreaker.CircuitBreaker[any]
 }
 
-// NewDB builds the retry and circuit-breaker pair for database work.
+// NewDB builds the policies. Retry is outermost, so the breaker counts one logical
+// call once rather than counting every retry of it and opening far too eagerly.
 //
-// Composition order matters: the executor is built retry-outermost, so a transient
-// failure is retried, and only a run of genuine failures trips the breaker. Building
-// it the other way would let the breaker count each retry of a single logical call
-// as a separate failure and open far too eagerly.
-//
-// Requires: cfg fields are non-negative; a zero MaxRetries disables retrying.
-// Ensures:  the returned DB is safe for concurrent use.
+// The returned DB is safe for concurrent use.
 func NewDB(cfg Config, logger *slog.Logger) *DB {
 	breaker := circuitbreaker.NewBuilder[any]().
 		HandleIf(func(_ any, err error) bool {
@@ -138,17 +117,10 @@ func NewDB(cfg Config, logger *slog.Logger) *DB {
 // State reports the circuit breaker's current state, for the readiness endpoint.
 func (d *DB) State() string { return d.breaker.State().String() }
 
-// Read runs an idempotent operation under the retry and circuit-breaker policies.
+// Read runs an idempotent operation under retry and the breaker.
 //
-// It is a function rather than a method because Go does not allow methods to
-// introduce new type parameters.
-//
-// Requires: op is idempotent — a transient failure replays it. A nil db runs op
-//
-//	directly, which keeps resilience optional for callers that have not
-//	opted in.
-//
-// Ensures: returns ErrUnavailable when the breaker is open; otherwise op's result.
+// Requires: op is idempotent; a transient failure replays it. A nil db runs op
+// directly. Returns ErrUnavailable when the breaker is open.
 func Read[T any](ctx context.Context, db *DB, op func(context.Context) (T, error)) (T, error) {
 	if db == nil {
 		return op(ctx)
@@ -156,17 +128,12 @@ func Read[T any](ctx context.Context, db *DB, op func(context.Context) (T, error
 	return runUnder(ctx, db.query, op)
 }
 
-// Write runs a non-idempotent operation under the circuit breaker alone.
+// Write runs a non-idempotent operation under the breaker alone, never retried:
+// replaying a write that may already have committed is worse than surfacing the
+// error, and there is no idempotency key here to make a replay safe.
 //
-// It is never retried: replaying a write that may already have committed is worse
-// than surfacing the error, and this service has no idempotency key to make a
-// replay safe (summary_rules §12). It still goes through the breaker so an outage
-// fails fast, and so a failing write helps open the shared breaker.
-//
-// Requires: op has side effects; it is invoked at most once.
-// Ensures:  returns ErrUnavailable when the breaker is open, without invoking op;
-//
-//	otherwise op's result.
+// op runs at most once. Returns ErrUnavailable, without invoking op, when the
+// breaker is open.
 func Write[T any](ctx context.Context, db *DB, op func(context.Context) (T, error)) (T, error) {
 	if db == nil {
 		return op(ctx)
@@ -174,16 +141,14 @@ func Write[T any](ctx context.Context, db *DB, op func(context.Context) (T, erro
 	return runUnder(ctx, db.exec, op)
 }
 
-// runUnder executes op through the given executor, unboxing the any-typed result
-// failsafe works in.
+// runUnder unboxes the any-typed result failsafe works in.
 func runUnder[T any](
 	ctx context.Context, executor failsafe.Executor[any], op func(context.Context) (T, error),
 ) (T, error) {
 	var zero T
 
-	// ctx is passed straight through rather than read back from the execution: the
-	// executors carry no timeout policy, so the execution context is this same
-	// context, and forwarding it directly keeps the data flow obvious.
+	// No timeout policy is configured, so the execution context is this one;
+	// forwarding ctx directly keeps the data flow obvious.
 	result, err := executor.WithContext(ctx).Get(func() (any, error) {
 		return op(ctx)
 	})
@@ -203,15 +168,8 @@ func runUnder[T any](
 	return typed, nil
 }
 
-// IsRetryable reports whether err describes a transient database failure that is
-// safe to replay.
-//
-// Requires: nothing.
-// Ensures:  returns false for a nil error, for a cancelled context (the caller has
-//
-//	already given up), and for anything not on the known-transient list.
-//	Defaulting to false is the safe direction: retrying an unknown failure
-//	risks applying a write twice.
+// IsRetryable reports whether err is a transient failure that is safe to replay.
+// It defaults to false: retrying an unknown failure risks applying a write twice.
 func IsRetryable(err error) bool {
 	if err == nil {
 		return false
@@ -237,8 +195,7 @@ func IsRetryable(err error) bool {
 	}
 }
 
-// isInfrastructureFailure reports whether err suggests the database itself is
-// unhealthy, as opposed to the request being bad.
+// isInfrastructureFailure distinguishes an unhealthy database from a bad request.
 func isInfrastructureFailure(err error) bool {
 	if err == nil {
 		return false
@@ -254,8 +211,7 @@ func isInfrastructureFailure(err error) bool {
 	return !isPgError && isNetworkFailure(err)
 }
 
-// isNetworkFailure reports whether err looks like a transport problem rather than a
-// response from the server.
+// isNetworkFailure reports a transport problem rather than a server response.
 func isNetworkFailure(err error) bool {
 	if _, ok := errors.AsType[*pgconn.ConnectError](err); ok {
 		return true

@@ -16,25 +16,19 @@ import (
 	"github.com/example/pets/internal/db"
 )
 
-// This file is the functional core: decisions, validation, and translation between
-// wire and storage shapes. Nothing here performs I/O, so every function in it is
-// testable by passing values in and comparing values out. The imperative shell —
-// transactions, queries, HTTP — lives in handler.go.
+// This file is the functional core: validation, decisions, and wire/storage
+// translation, with no I/O. The imperative shell lives in handler.go.
 
-// errInvalid marks a validation failure. The shell maps it onto
-// connect.CodeInvalidArgument; it is the only error class the core produces.
+// errInvalid marks a validation failure, the only error class the core produces.
+// The shell maps it onto connect.CodeInvalidArgument.
 var errInvalid = errors.New("invalid argument")
 
 const (
-	// defaultPageSize is the page size used when a request does not ask for one.
 	defaultPageSize int32 = 20
-	// maxPageSize caps how much a single request may fetch, so one caller cannot ask
-	// the database for an unbounded result set.
-	maxPageSize int32 = 200
-	// birthDateLayout is the wire format for Pet.birth_date.
-	birthDateLayout = "2006-01-02"
-	// statusPrefix is the generated enum's value prefix.
-	statusPrefix = "PET_STATUS_"
+	// maxPageSize stops one caller asking for an unbounded result set.
+	maxPageSize     int32 = 200
+	birthDateLayout       = "2006-01-02"
+	statusPrefix          = "PET_STATUS_"
 )
 
 // petInput is a create or update request after validation and normalization.
@@ -48,18 +42,11 @@ type petInput struct {
 	PhotoUrls          []string
 }
 
-// newPetInput validates and normalizes a creation request.
+// newPetInput validates and normalizes a creation request. Updates go through
+// newUpdateParams instead, which needs per-field presence.
 //
-// Updates do not come through here: partial-update semantics need per-field
-// presence, which newUpdateParams handles instead.
-//
-// Requires: msg is non-nil.
-// Ensures:  on success, Name and Species are trimmed and non-empty, Tags is non-nil
-//
-//	(so it encodes as [] rather than null), Status is a concrete enum name
-//	rather than UNSPECIFIED, and BirthDate is either a valid date or an
-//	explicit null. On failure the error wraps errInvalid and names the
-//	offending field.
+// Ensures: on success Name and Species are trimmed and non-empty, the slices are
+// non-nil, and Status is concrete. Failures wrap errInvalid and name the field.
 func newPetInput(msg *petv1.CreatePetRequest) (petInput, error) {
 	name := strings.TrimSpace(msg.GetName())
 	species := strings.TrimSpace(msg.GetSpecies())
@@ -99,16 +86,8 @@ func newPetInput(msg *petv1.CreatePetRequest) (petInput, error) {
 	}, nil
 }
 
-// parseDate converts a YYYY-MM-DD string into a Postgres date.
-//
-// A birth date is optional: an empty value is not an error, it is the absence of a
-// known date, and maps to SQL NULL. Only a non-empty value that fails to parse is
-// rejected.
-//
-// Requires: nothing.
-// Ensures:  err is nil for an empty input, and the returned Date is then invalid
-//
-//	(SQL NULL); for a parsable input the Date is Valid.
+// parseDate converts a YYYY-MM-DD string into a Postgres date. A birth date is
+// optional, so an empty value is an absent date (SQL NULL), not an error.
 func parseDate(dateStr string) (pgtype.Date, error) {
 	trimmed := strings.TrimSpace(dateStr)
 	if trimmed == "" {
@@ -121,10 +100,8 @@ func parseDate(dateStr string) (pgtype.Date, error) {
 	return pgtype.Date{Time: t, Valid: true}, nil
 }
 
-// parseUUID converts a caller-supplied UUID string into its Postgres form.
-//
-// Requires: nothing.
-// Ensures:  err wraps errInvalid and names the field when the value is not a UUID.
+// parseUUID converts a caller-supplied UUID. A failure wraps errInvalid and names
+// the field.
 func parseUUID(field, value string) (pgtype.UUID, error) {
 	var uid pgtype.UUID
 	if err := uid.Scan(value); err != nil {
@@ -133,12 +110,10 @@ func parseUUID(field, value string) (pgtype.UUID, error) {
 	return uid, nil
 }
 
-// pageBounds converts a page number and size into SQL LIMIT and OFFSET values.
+// pageBounds converts a page number and size into LIMIT and OFFSET.
 //
-// Requires: nothing; out-of-range input is reported rather than truncated silently.
-// Ensures:  on success limit is in [1, maxPageSize] and offset is a non-negative
-//
-//	int32; on failure both are zero and the error wraps errInvalid.
+// Ensures: on success limit is in [1, maxPageSize] and offset is a non-negative
+// int32; on failure both are zero. Out-of-range input errors rather than truncating.
 func pageBounds(page, pageSize int32) (limit, offset int32, err error) {
 	limit = defaultPageSize
 	if pageSize > 0 {
@@ -157,8 +132,6 @@ func pageBounds(page, pageSize int32) (limit, offset int32, err error) {
 }
 
 // clampToInt32 narrows a count to int32, saturating rather than wrapping.
-//
-// Ensures: the result is the nearest representable int32 to v.
 func clampToInt32(v int64) int32 {
 	switch {
 	case v > math.MaxInt32:
@@ -170,13 +143,9 @@ func clampToInt32(v int64) int32 {
 	}
 }
 
-// statusFromDB maps a stored status onto the generated enum, tolerating values
-// written with or without the enum's PET_STATUS_ prefix.
-//
-// Ensures: an unrecognised value maps to PET_STATUS_UNSPECIFIED rather than failing;
-//
-//	the database is the source of truth and a reader should not error on a
-//	value a newer writer introduced.
+// statusFromDB maps a stored status onto the enum, with or without the
+// PET_STATUS_ prefix. An unrecognised value maps to UNSPECIFIED rather than
+// failing: a reader should not error on a value a newer writer introduced.
 func statusFromDB(stored string) petv1.PetStatus {
 	name := stored
 	if !strings.HasPrefix(name, statusPrefix) {
@@ -186,11 +155,6 @@ func statusFromDB(stored string) petv1.PetStatus {
 }
 
 // toProtoPet renders a stored pet into the wire type.
-//
-// Requires: nothing.
-// Ensures:  the returned Pet is non-nil; PhotoUrls and Tags are carried through as
-//
-//	stored, which the NOT NULL columns guarantee are non-null.
 func toProtoPet(p db.Pet) *petv1.Pet {
 	var birthDate string
 	if p.BirthDate.Valid {
@@ -218,10 +182,9 @@ func toProtoPet(p db.Pet) *petv1.Pet {
 	return protoPet
 }
 
-// updatePaths are the update_mask paths this service understands. A mask naming
-// anything else is rejected rather than silently ignored: a client that asks to
-// change a field the server does not know about has misunderstood the API, and
-// discarding the request half-applied would be worse than refusing it.
+// updatePaths are the writable update_mask paths. An unknown path is rejected
+// rather than ignored: half-applying a misunderstood request is worse than
+// refusing it.
 var updatePaths = map[string]bool{
 	"name":                 true,
 	"species":              true,
@@ -232,22 +195,11 @@ var updatePaths = map[string]bool{
 	"tags":                 true,
 }
 
-// newUpdateParams turns an update request into the nullable parameter set the
-// UpdatePet statement expects, where a null parameter means "leave this column".
+// newUpdateParams builds the UpdatePet parameters, where a null means "leave this
+// column". The mask semantics are documented on UpdatePetRequest in the proto.
 //
-// Two modes, per the contract documented on UpdatePetRequest:
-//   - mask present: only the named paths are written.
-//   - mask absent: full replacement of every field the caller can set.
-//
-// In both modes an unspecified status leaves the stored status alone. That is a
-// deliberate deviation from strict replacement: a zero enum is indistinguishable
+// An unspecified status always means "leave alone": a zero enum cannot be told
 // from an unsent one, and resetting an adopted pet to available is never intended.
-//
-// Requires: msg is non-nil; id identifies the row; modifiedBy is the caller.
-// Ensures:  on success every field the mask names (or, with no mask, every field
-//
-//	the caller set) appears in the result, and no other column is
-//	touched. A mask naming an unknown path is an errInvalid failure.
 func newUpdateParams(
 	msg *petv1.UpdatePetRequest, id pgtype.UUID, modifiedBy string,
 ) (db.UpdatePetParams, error) {
@@ -313,8 +265,8 @@ func newUpdateParams(
 	return params, nil
 }
 
-// orEmpty replaces a nil slice with an empty one, so that a masked write of a
-// repeated field clears it rather than being read as "leave alone" by the SQL.
+// orEmpty replaces nil with empty, so a masked write of a repeated field clears it
+// rather than reading as "leave alone" in the SQL.
 func orEmpty(values []string) []string {
 	if values == nil {
 		return []string{}

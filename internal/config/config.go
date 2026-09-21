@@ -36,11 +36,9 @@ const (
 	DefaultDevToken    = "dev-secret-token"
 	DefaultCertFile    = ".certs/cert.pem"
 	DefaultKeyFile     = ".certs/key.pem"
-	// DefaultAdminAddr binds the admin listener to loopback only. Metrics, pprof, and
-	// trace snapshots must never be reachable from outside the host by default.
+	// DefaultAdminAddr is loopback: pprof must not be reachable off-host by default.
 	DefaultAdminAddr = "127.0.0.1:9090"
-	// DefaultRateLimitRPS is the per-instance admission rate. Set RATE_LIMIT_RPS=0 to
-	// turn admission control off.
+	// DefaultRateLimitRPS per instance; RATE_LIMIT_RPS=0 disables it.
 	DefaultRateLimitRPS uint = 200
 )
 
@@ -59,14 +57,11 @@ type Config struct {
 	LogLevel          string
 	LogFormat         string
 
-	// AdminAddr is where metrics, pprof, and trace snapshots are served. Set it to
-	// "off" to disable the admin listener entirely.
+	// AdminAddr serves metrics, pprof and trace snapshots; "off" disables it.
 	AdminAddr string
-	// TraceSnapshotDir enables the execution-trace flight recorder and names the
-	// directory snapshots are written to. Empty disables the recorder.
+	// TraceSnapshotDir enables the flight recorder and names its output directory.
 	TraceSnapshotDir string
-	// RateLimitRPS is the sustained request rate this instance admits. Zero disables
-	// admission control.
+	// RateLimitRPS admitted per instance; zero disables admission control.
 	RateLimitRPS uint
 }
 
@@ -77,22 +72,12 @@ func (c *Config) AdminEnabled() bool {
 
 // Load builds a Config from the environment exposed by getenv.
 //
-// Taking getenv as a parameter rather than calling os.Getenv keeps this free of
-// process-global state: tests supply a map instead of mutating the environment with
-// t.Setenv, which in turn lets them run in parallel.
+// getenv is a parameter, not os.Getenv, so tests pass a map instead of calling
+// t.Setenv and can run in parallel. A nil getenv means an empty environment.
 //
-// Development is the default posture, because an unconfigured checkout should run.
-// Production is entered by setting APP_ENV=production (or DEV_MODE=false), and in
-// that posture no credential, token, or CORS origin is ever invented — an operator
-// must name them explicitly.
-//
-// Requires: getenv behaves like os.Getenv, returning "" for unset names. A nil
-//
-//	getenv is treated as an empty environment.
-//
-// Ensures: returns a non-nil Config with every field populated; AllowedOrigins never
-//
-//	contains "*", which cannot be combined with credentialed CORS.
+// Development is the default so an unconfigured checkout runs. APP_ENV=production
+// (or DEV_MODE=false) switches posture, and there no credential, token, or CORS
+// origin is ever invented — an operator must name them.
 func Load(getenv func(string) string) *Config {
 	if getenv == nil {
 		getenv = func(string) string { return "" }
@@ -107,8 +92,8 @@ func Load(getenv func(string) string) *Config {
 	}
 
 	allowedOrigins := splitNonEmpty(getenv(EnvAllowedOrigins))
-	// A credentialed CORS response may not use the "*" wildcard, so drop it rather
-	// than emit a configuration the browser will reject.
+	// Credentialed CORS forbids "*", so drop it rather than emit a config the
+	// browser will reject.
 	allowedOrigins = slices.DeleteFunc(allowedOrigins, func(origin string) bool {
 		return origin == "*"
 	})
@@ -141,11 +126,8 @@ func Load(getenv func(string) string) *Config {
 	}
 }
 
-// Validate reports whether the configuration is safe to serve with.
-//
-// Ensures: returns an error when authentication is enabled but no credential source
-//
-//	is configured, which would otherwise reject every request in production.
+// Validate rejects a configuration that would refuse every request: authentication
+// enabled in production with no credential source.
 func (c *Config) Validate() error {
 	if c.AuthEnabled && !c.DevMode && !c.TrustProxyHeaders && len(c.AuthTokens) == 0 {
 		return errNoCredentialSource
@@ -153,7 +135,7 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// splitNonEmpty splits a comma-separated list, discarding blank entries.
+// splitNonEmpty splits a comma-separated list, discarding blanks.
 func splitNonEmpty(value string) []string {
 	var values []string
 	for part := range strings.SplitSeq(value, ",") {
@@ -172,7 +154,7 @@ func stringOr(value, fallback string) string {
 	return fallback
 }
 
-// boolOr parses value as a bool, returning fallback when it is empty or malformed.
+// boolOr parses a bool, falling back when empty or malformed.
 func boolOr(value string, fallback bool) bool {
 	if value == "" {
 		return fallback
@@ -184,8 +166,8 @@ func boolOr(value string, fallback bool) bool {
 	return parsed
 }
 
-// uintOr parses value as an unsigned integer, returning fallback when it is empty or
-// malformed. A parsed zero is honoured, because zero means "disabled".
+// uintOr parses an unsigned integer, falling back when empty or malformed. A
+// parsed zero is honoured: zero means "disabled".
 func uintOr(value string, fallback uint) uint {
 	if strings.TrimSpace(value) == "" {
 		return fallback

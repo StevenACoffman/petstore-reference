@@ -18,15 +18,13 @@ const (
 )
 
 func main() {
-	// os.Exit is called from a frame that holds no defers, so every cleanup in
-	// serve() — including releasing the signal handler — runs first.
+	// This frame holds no defers, so serve()'s cleanup all runs before the exit.
 	os.Exit(serve())
 }
 
-// serve owns the process lifecycle and translates run's error into an exit code.
-//
-// signal.NotifyContext belongs here rather than inside run so that a test can drive
-// run with its own cancellable context and never install a process-wide handler.
+// serve owns the process lifecycle and turns run's error into an exit code.
+// signal.NotifyContext lives here so a test can drive run with its own context
+// and never install a process-wide handler.
 func serve() int {
 	ctx, stop := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT,

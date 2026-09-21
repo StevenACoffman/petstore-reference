@@ -130,10 +130,10 @@ just check
 just hooks
 ```
 
-The same gates run on every push and pull request via
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml): lint, tidy, generated-code
-freshness, `buf lint` plus breaking-change detection, unit tests, integration tests,
-a fuzz smoke run, `govulncheck`, and the frontend build and tests.
+[CI](.github/workflows/ci.yml) runs the same gates on every push and PR: lint, tidy,
+generated-code freshness, `buf lint` and breaking-change detection, unit and
+integration tests, a fuzz smoke run, `govulncheck`, mutation testing, and the
+frontend build and tests.
 
 ### 5. Run the Go Microservice
 ```bash
@@ -142,10 +142,9 @@ just run
 The service will be listening on `https://localhost:8080` (TLS enabled via `mkcert`).
 - **Interactive OpenAPI Documentation:** `https://localhost:8080/docs`
 - **OpenAPI 3.1 Spec (YAML):** `https://localhost:8080/openapi.yaml`
-- **Liveness:** `https://localhost:8080/healthz` — the process is up. Touches no
-  dependency, so a database blip never gets a healthy pod killed.
-- **Readiness:** `https://localhost:8080/readyz` — the service can serve traffic,
-  which means PostgreSQL is reachable. This is the one a load balancer should poll.
+- **Liveness:** `/healthz` — the process is up. Touches no dependency, so a database
+  blip never gets a healthy pod killed.
+- **Readiness:** `/readyz` — PostgreSQL is reachable. Poll this one from a balancer.
 - **Connect Service:** `https://localhost:8080/pet.v1.PetService/`
 
 Operational endpoints are served on a **separate admin listener**, bound to loopback
@@ -215,38 +214,33 @@ Tests that touch the database run against real PostgreSQL (`postgres:17-alpine`)
 - **Fast isolation via `TRUNCATE`**: To keep test suites fast (<3s), suites reuse the container and run `TRUNCATE TABLE pets RESTART IDENTITY CASCADE;` between tests instead of recreating containers.
 - **Docker & Colima**: Automatically detects Colima on macOS (`~/.colima/default/docker.sock`). Set `DATABASE_URL` to point tests at an existing database instead.
 - **Pure unit tests**: Logic without database dependencies (config, CORS, auth headers, validation helpers) runs in-memory.
-- **Build-tagged separation**: Container-backed suites sit behind `//go:build integration`
-  in `*_integration_test.go` files, so `just test` stays fast and needs no Docker,
-  while `just test-integration` runs everything.
-- **Race detector everywhere**: both `just test` and `just test-integration` run `-race`.
-- **Fuzzing**: the pure core in [`internal/pet/core.go`](internal/pet/core.go) has fuzz
-  targets in [`fuzz_test.go`](internal/pet/fuzz_test.go) that assert invariants rather
-  than fixed outputs — for example, that a pet accepted by `newPetInput` always has
-  trimmed, non-blank fields and non-nil slices, whatever bytes arrived on the wire.
+- **Build-tagged separation**: container suites sit behind `//go:build integration`,
+  so `just test` stays fast and Docker-free; `just test-integration` runs everything.
+  Both run `-race`.
+- **Fuzzing** over the pure core ([`fuzz_test.go`](internal/pet/fuzz_test.go)),
+  asserting invariants rather than fixed outputs — e.g. that an accepted pet always
+  has trimmed, non-blank fields and non-nil slices, whatever arrived on the wire.
 - **Mutation testing** with [mutago](https://github.com/quality-gates/mutago) over
-  `internal/pet/core.go`, currently **92.9% MSI** in about 30 seconds. Mutation
-  testing answers what coverage cannot: not "did a test execute this line?" but
-  "would any test have noticed if it behaved differently?". It is scoped to the pure
-  core because that is where the invariants live — `handler.go` is proven by the
-  container-backed suites, which a mutation run does not execute, so scoring it here
-  would measure the wrong thing. Configuration lives in
-  [`.mutago.yml`](.mutago.yml); the CI job also reports surviving mutants on the
-  lines a pull request changed.
-- **Golden schema snapshot**: [`internal/db/testdata/schema.golden`](internal/db/testdata/schema.golden)
-  pins the schema the migrations produce, so a migration that drops a column or
-  loosens a constraint shows up as a reviewable diff. Refresh it with
+  `internal/pet/core.go` — **95% MSI** in ~30s. It answers what coverage cannot: not
+  "did a test run this line?" but "would any test have noticed if it behaved
+  differently?". Scoped to the pure core, because `handler.go` is proven by the
+  container suites a mutation run does not execute. See [`.mutago.yml`](.mutago.yml);
+  CI also reports surviving mutants on the lines a PR changed.
+- **Golden schema snapshot** ([`schema.golden`](internal/db/testdata/schema.golden)):
+  a migration that drops a column or loosens a constraint shows up as a reviewable
+  diff. Refresh with
   `go test -tags=integration -run TestSchemaGolden ./internal/db/ -update`.
-- **End-to-end in-process**: [`cmd/server/integration_test.go`](cmd/server/integration_test.go)
-  drives the fully wired `run()` on an OS-assigned port as a real HTTP client.
+- **End-to-end in-process**: [`integration_test.go`](cmd/server/integration_test.go)
+  drives the wired `run()` on an OS-assigned port as a real HTTP client.
 - **Frontend mocks**: Web tests in `web/` use [FauxRPC](https://github.com/sudorandom/fauxrpc) stubs to test UI states without a running backend.
 
 ---
 
 ## ⚙️ Configuration
 
-Every setting is read from the environment at startup. The service defaults to a
-development posture so an unconfigured checkout runs; set `APP_ENV=production` (or
-`DEV_MODE=false`) and no credential, token, or CORS origin is ever invented for you.
+Read from the environment at startup. Development is the default so an unconfigured
+checkout runs; `APP_ENV=production` (or `DEV_MODE=false`) invents no credential,
+token or CORS origin for you.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -272,8 +266,8 @@ development posture so an unconfigured checkout runs; set `APP_ENV=production` (
 | `OTEL_SAMPLE_PERCENTAGE` | `100` | Root-span sampling; accepts a trailing `%` |
 | `OTEL_CONFIG_FILE` | unset | Optional YAML/JSON/TOML telemetry config, overlaid by the environment |
 
-Startup refuses to proceed if authentication is enabled in production with no
-credential source configured — neither `TRUST_PROXY_HEADERS` nor `AUTH_TOKENS`.
+Startup refuses to proceed if authentication is enabled in production with neither
+`TRUST_PROXY_HEADERS` nor `AUTH_TOKENS` set.
 
 ---
 
@@ -282,24 +276,17 @@ credential source configured — neither `TRUST_PROXY_HEADERS` nor `AUTH_TOKENS`
 Backed by [failsafe-go](https://failsafe-go.dev), scoped to failures this service
 actually has:
 
-- **Retry with exponential backoff and jitter** on read paths only, and only for
-  SQLSTATEs known to be transient *and* known not to have applied — serialization
-  failures, deadlocks, and connection-class errors. Writes are non-idempotent, so
-  they deliberately stay outside the retry policy: replaying one that may already
-  have committed is worse than surfacing the error.
-- **Circuit breaker** on the database path — covering reads *and* writes, sharing
-  one breaker — so an outage fails fast with `Unavailable` instead of parking every
-  request on a connection-pool wait. Its predicate ignores caller errors: a stream
-  of constraint violations means bad requests, not an unhealthy database, and must
-  not trip it. Writes get the breaker without the retry, for the reason above.
-- **Rate limiting** as a Connect interceptor (`RATE_LIMIT_RPS`), using a smooth
-  limiter so permits are spaced evenly rather than arriving as a burst.
-- **Per-RPC deadlines**, so one slow query cannot hold a pool connection for as long
-  as a client is willing to wait. A stricter client deadline is honoured; a more
-  generous one is clamped.
-- **Explicit connection pool bounds**, rather than pgx's CPU-derived default, which
-  is also what makes the circuit breaker meaningful — without a ceiling an outage
-  just grows the pool's wait queue.
+- **Retry with backoff and jitter**, reads only, and only for SQLSTATEs known to be
+  transient *and* known not to have applied. Replaying a write that may already have
+  committed is worse than surfacing the error.
+- **Circuit breaker** over reads and writes alike, sharing one breaker, so an outage
+  fails fast instead of parking requests on a pool wait. Its predicate ignores caller
+  errors: constraint violations mean bad requests, not an unhealthy database.
+- **Rate limiting** (`RATE_LIMIT_RPS`), smooth rather than bursty so permits are
+  spaced evenly.
+- **Per-RPC deadlines**: a stricter client deadline is honoured, a longer one clamped.
+- **Explicit pool bounds** rather than pgx's CPU-derived default — without a ceiling
+  an outage just grows the wait queue.
 
 ---
 

@@ -25,11 +25,8 @@ const (
 	EnvFallbackFile   = "CONFIG_FILE"
 )
 
-// Config holds configuration options for OpenTelemetry.
-//
-// The struct tags describe the config-file shape only. Environment variables are
-// applied separately by applyEnv so that loading never touches process-global
-// state; see LoadConfig.
+// Config holds the OpenTelemetry settings. The tags describe the config-file shape
+// only; the environment is applied separately by applyEnv.
 type Config struct {
 	ServiceName      string  `json:"service_name"      toml:"service_name"      yaml:"service_name"`
 	ServiceVersion   string  `json:"service_version"   toml:"service_version"   yaml:"service_version"`
@@ -39,8 +36,7 @@ type Config struct {
 	SamplePercentage float64 `json:"sample_percentage" toml:"sample_percentage" yaml:"sample_percentage"`
 }
 
-// DefaultConfig returns the configuration used before any file or environment
-// override is applied.
+// DefaultConfig is the configuration before any override.
 func DefaultConfig() Config {
 	return Config{
 		ServiceName:      "pets-service",
@@ -50,22 +46,13 @@ func DefaultConfig() Config {
 	}
 }
 
-// LoadConfig builds a Config from an optional config file overlaid with environment
-// variables read through getenv. Precedence, lowest to highest: defaults, config
-// file, environment.
+// LoadConfig builds a Config from defaults, then an optional file, then the
+// environment. The file comes from configPath, OTEL_CONFIG_FILE or CONFIG_FILE; a
+// missing one is not an error, a malformed one is reported but still leaves the
+// Config usable.
 //
-// The config file is located from the first non-empty of: the configPath argument,
-// OTEL_CONFIG_FILE, CONFIG_FILE. A named file that does not exist is not an error —
-// it means "configure from the environment". A file that exists but cannot be parsed
-// is reported through the returned error; the Config is still usable.
-//
-// Requires: getenv behaves like os.Getenv, returning "" for unset names. A nil
-//
-//	getenv is treated as "no environment".
-//
-// Ensures: never reads or writes process-global state, so callers may run it
-//
-//	concurrently; ExporterType is always non-empty in the returned Config.
+// A nil getenv means "no environment". Touches no process-global state, so it is
+// safe to call concurrently.
 func LoadConfig(getenv func(string) string, configPath ...string) (Config, error) {
 	if getenv == nil {
 		getenv = func(string) string { return "" }
@@ -74,9 +61,8 @@ func LoadConfig(getenv func(string) string, configPath ...string) (Config, error
 
 	var err error
 	if path := resolveConfigPath(getenv, configPath...); path != "" {
-		// cleanenv owns file location and format dispatch. The Config struct carries no
-		// `env` tags, so ReadConfig's environment pass is a no-op and the file is the
-		// only thing applied here — environment handling stays in applyEnv, below.
+		// Config carries no `env` tags, so ReadConfig's environment pass is a no-op
+		// and only the file is applied here; applyEnv handles the rest.
 		if readErr := cleanenv.ReadConfig(path, &cfg); readErr != nil {
 			if !errors.Is(readErr, fs.ErrNotExist) {
 				err = fmt.Errorf("reading telemetry config %q: %w", path, readErr)
@@ -97,11 +83,8 @@ func LoadConfig(getenv func(string) string, configPath ...string) (Config, error
 	return cfg, err
 }
 
-// resolveConfigPath picks the config file to read, preferring an explicit argument
-// over the environment. It returns "" when no file was named.
-//
-// The chosen path is cleaned so that a value carrying "." or ".." segments resolves
-// to one canonical form before it reaches the filesystem.
+// resolveConfigPath picks the config file, preferring the argument over the
+// environment, and cleans it. Returns "" when none was named.
 func resolveConfigPath(getenv func(string) string, configPath ...string) string {
 	if len(configPath) > 0 && configPath[0] != "" {
 		return filepath.Clean(configPath[0])
@@ -115,8 +98,7 @@ func resolveConfigPath(getenv func(string) string, configPath ...string) string 
 	return ""
 }
 
-// applyEnv overlays environment values onto cfg. An unset or unparsable variable
-// leaves the existing value untouched.
+// applyEnv overlays the environment; an unset or unparsable variable is ignored.
 func applyEnv(cfg *Config, getenv func(string) string) {
 	if v := strings.TrimSpace(getenv(EnvServiceName)); v != "" {
 		cfg.ServiceName = v
@@ -140,16 +122,12 @@ func applyEnv(cfg *Config, getenv func(string) string) {
 	}
 }
 
-// parseSamplePercentage resolves the trace sampling rate from its two environment
-// spellings. OTEL_SAMPLE_PERCENTAGE is this service's own knob and accepts an
-// optional trailing "%". OTEL_TRACES_SAMPLER_ARG is the OpenTelemetry-standard
-// spelling and carries a ratio in (0, 1]; a value above 1 is already a percentage.
+// parseSamplePercentage resolves the sampling rate from its two spellings.
+// OTEL_SAMPLE_PERCENTAGE is ours and accepts a trailing "%";
+// OTEL_TRACES_SAMPLER_ARG is the OTel standard and carries a ratio in (0, 1].
 //
-// Requires: pct and samplerArg are the raw variable values, "" when unset.
-// Ensures:  returns (rate, true) with rate in [0, 100] when a value parses,
-//
-//	preferring pct; returns (0, false) otherwise so the caller keeps
-//	whatever value it already had.
+// Returns (rate in [0,100], true), preferring pct, or (0, false) so the caller
+// keeps what it had.
 func parseSamplePercentage(pct, samplerArg string) (float64, bool) {
 	if raw := strings.TrimSpace(pct); raw != "" {
 		raw = strings.TrimSpace(strings.TrimSuffix(raw, "%"))

@@ -86,8 +86,8 @@ func NewConnectInterceptor() (connect.Interceptor, error) {
 	)
 }
 
-// NewResource describes this service to the telemetry pipeline. Traces and metrics
-// share it so a span and a metric series can be attributed to the same deployment.
+// NewResource describes this service. Traces and metrics share it so a span and a
+// metric series attribute to the same deployment.
 func NewResource(ctx context.Context, cfg Config) (*resource.Resource, error) {
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
