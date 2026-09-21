@@ -15,6 +15,7 @@ const (
 	EnvDevMode           = "DEV_MODE"
 	EnvAutoMigrate       = "AUTO_MIGRATE"
 	EnvDevEmail          = "DEV_EMAIL"
+	EnvDevRoles          = "DEV_ROLES"
 	EnvAuthEnabled       = "AUTH_ENABLED"
 	EnvAuthTokens        = "AUTH_TOKENS"
 	EnvTrustProxyHeaders = "TRUST_PROXY_HEADERS"
@@ -43,11 +44,14 @@ const (
 )
 
 type Config struct {
-	Port              string
-	DatabaseURL       string
-	AuthEnabled       bool
-	DevMode           bool
-	DevEmail          string
+	Port        string
+	DatabaseURL string
+	AuthEnabled bool
+	DevMode     bool
+	DevEmail    string
+	// DevRoles is the local development identity's role set. Narrow it to feel what
+	// a non-admin caller feels.
+	DevRoles          []string
 	AuthTokens        []string
 	TrustProxyHeaders bool
 	AllowedOrigins    []string
@@ -112,6 +116,7 @@ func Load(getenv func(string) string) *Config {
 		AuthEnabled:       boolOr(getenv(EnvAuthEnabled), true),
 		DevMode:           devMode,
 		DevEmail:          stringOr(getenv(EnvDevEmail), DefaultDevEmail),
+		DevRoles:          splitNonEmpty(getenv(EnvDevRoles)),
 		AuthTokens:        splitNonEmpty(tokens),
 		TrustProxyHeaders: boolOr(getenv(EnvTrustProxyHeaders), false),
 		AllowedOrigins:    allowedOrigins,

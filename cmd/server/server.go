@@ -49,7 +49,7 @@ func newServerHandler(cfg *config.Config, pool *pgxpool.Pool, resilientDB *resil
 	// Global middleware is applied here, once, rather than repeated per route.
 	var handler http.Handler = mux
 	if cfg.DevMode {
-		handler = auth.DevIdentityMiddleware(cfg.DevEmail, "dev-user-001")(handler)
+		handler = auth.DevIdentityMiddleware(cfg.DevEmail, auth.DefaultDevSubject, cfg.DevRoles)(handler)
 	}
 	return cors.New(corsOptions(cfg)).Handler(handler), nil
 }

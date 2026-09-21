@@ -253,6 +253,7 @@ token or CORS origin for you.
 | `AUTH_TOKENS` | dev token in dev | Comma-separated static bearer tokens |
 | `TRUST_PROXY_HEADERS` | `false` | Accept upstream IAP / OAuth2-Proxy identity headers |
 | `DEV_EMAIL` | `developer@local.test` | Identity injected in dev mode |
+| `DEV_ROLES` | `user,admin` | Roles for the dev identity; narrow it to test as a non-admin |
 | `CORS_ALLOWED_ORIGINS` | localhost in dev | Comma-separated; `*` is dropped, as credentialed CORS forbids it |
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | `.certs/*.pem` | Serve TLS when both exist, otherwise cleartext |
 | `LOG_LEVEL` | `debug` in dev, `info` otherwise | `debug`, `info`, `warn`, `error` |
@@ -296,5 +297,5 @@ In production, user login is handled by an upstream reverse proxy (like Google C
 
 - **Proxy headers**: Reads identity from IAP (`X-Goog-Authenticated-User-*`) or OAuth2 Proxy (`X-Forwarded-*`) when `TRUST_PROXY_HEADERS=true`. Only enable this behind a proxy that strips untrusted client headers.
 - **Bearer tokens**: Set `AUTH_TOKENS=token1,token2` for service-to-service or CLI access (`Authorization: Bearer <token>`).
-- **Local dev**: When `DEV_MODE=true` (default), requests without credentials automatically use a dummy developer identity (`developer@local.test`).
+- **Local dev**: with `DEV_MODE=true` (the default) a request without credentials gets a developer identity (`developer@local.test`, roles `user,admin`). The middleware simulates oauth2-proxy rather than IAP, because IAP carries no group membership and so could never exercise a role. Set `DEV_ROLES=user` to test as a non-admin.
 - **Context**: Parsed claims are accessible in Go handlers via [`auth.FromContext(ctx)`](internal/auth/auth.go).

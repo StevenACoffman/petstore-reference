@@ -229,7 +229,7 @@ func TestAuthInterceptorRejectsUntrustedProxyHeaders(t *testing.T) {
 func TestDevIdentityMiddleware(t *testing.T) {
 	t.Parallel()
 
-	middleware := auth.DevIdentityMiddleware("local-dev@example.com", "local-dev-user")
+	middleware := auth.DevIdentityMiddleware("local-dev@example.com", "local-dev-user", []string{"user", "admin"})
 
 	t.Run("injects headers when missing", func(t *testing.T) {
 		t.Parallel()
@@ -245,9 +245,12 @@ func TestDevIdentityMiddleware(t *testing.T) {
 
 		handler.ServeHTTP(rec, req)
 
-		assert.Equal(t, "accounts.google.com:local-dev@example.com", capturedReq.Header.Get("X-Goog-Authenticated-User-Email"))
+		// oauth2-proxy shape, not IAP: IAP carries no groups, so an IAP simulation
+		// could never exercise a role.
 		assert.Equal(t, "local-dev@example.com", capturedReq.Header.Get("X-Forwarded-Email"))
 		assert.Equal(t, "local-dev-user", capturedReq.Header.Get("X-Forwarded-User"))
+		assert.Equal(t, "user,admin", capturedReq.Header.Get("X-Forwarded-Groups"))
+		assert.Empty(t, capturedReq.Header.Get("X-Goog-Authenticated-User-Email"))
 	})
 
 	t.Run("preserves existing IAP headers", func(t *testing.T) {
@@ -267,6 +270,7 @@ func TestDevIdentityMiddleware(t *testing.T) {
 
 		assert.Equal(t, "accounts.google.com:custom@example.com", capturedReq.Header.Get("X-Goog-Authenticated-User-Email"))
 		assert.Empty(t, capturedReq.Header.Get("X-Forwarded-Email"))
+		assert.Empty(t, capturedReq.Header.Get("X-Forwarded-Groups"))
 	})
 
 	t.Run("preserves existing Authorization header", func(t *testing.T) {
@@ -299,4 +303,62 @@ func TestUserEmailFromContextRequiresIdentity(t *testing.T) {
 	email, ok = auth.UserEmailFromContext(auth.WithClaims(context.Background(), &auth.Claims{Email: "user@example.com"}))
 	assert.True(t, ok)
 	assert.Equal(t, "user@example.com", email)
+}
+
+// TestDevIdentityCarriesRoles pins the reason the dev middleware simulates
+// oauth2-proxy rather than IAP: IAP conveys no groups, so before this the local
+// identity was always exactly [user] and no other role could be exercised.
+func TestDevIdentityCarriesRoles(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		devRoles  []string
+		wantRoles []string
+	}{
+		"defaults to admin so a deny-by-default policy does not lock dev out": {
+			devRoles:  nil,
+			wantRoles: []string{"user", "admin"},
+		},
+		"can be narrowed to feel what a non-admin feels": {
+			devRoles:  []string{"user"},
+			wantRoles: []string{"user"},
+		},
+		"can name an arbitrary group": {
+			devRoles:  []string{"shelter-staff"},
+			wantRoles: []string{"shelter-staff"},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := auth.Config{Enabled: true, DevMode: true, TrustProxyHeaders: true}
+			client, svc := newAuthTestServer(t, cfg)
+
+			// Drive the request through the dev middleware exactly as cmd/server wires it.
+			recorder := httptest.NewRecorder()
+			injected := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
+			auth.DevIdentityMiddleware("dev@example.com", "dev-1", tc.devRoles)(
+				http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+					injected = r
+				}),
+			).ServeHTTP(recorder, injected)
+
+			req := connect.NewRequest(&petv1.GetPetRequest{Id: "123e4567-e89b-12d3-a456-426614174000"})
+			for _, h := range []string{"X-Forwarded-Email", "X-Forwarded-User", "X-Forwarded-Groups"} {
+				req.Header().Set(h, injected.Header.Get(h))
+			}
+
+			_, err := client.GetPet(t.Context(), req)
+
+			require.NoError(t, err)
+			claims := svc.claims()
+			require.NotNil(t, claims)
+			assert.Equal(t, "oauth2-proxy", claims.Provider,
+				"dev simulates oauth2-proxy, the only provider shape that carries groups")
+			assert.Equal(t, tc.wantRoles, claims.Roles)
+			assert.Equal(t, "dev@example.com", claims.Email)
+		})
+	}
 }

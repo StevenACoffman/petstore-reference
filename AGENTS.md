@@ -49,6 +49,10 @@ gen/            generated; never hand-edit
   pass a map instead of `t.Setenv` and can run in parallel.
 - **Never mutate process-global state from a library function.** No `os.Setenv` in a
   config loader, no `init()` writing globals.
+- **Deviation from §1:** there is no root domain package, because the generated
+  protobuf is this service's shared language. `internal/pet` therefore plays the
+  root's role and may import `auth`, `db` and `resilience`; those must not import
+  `pet` or each other. Keep the arrows pointing one way.
 
 ## Functional core, imperative shell
 
