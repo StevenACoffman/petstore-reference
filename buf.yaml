@@ -1,11 +1,11 @@
 version: v2
 modules:
-  - path: proto
+- path: proto
 lint:
   use:
-    - STANDARD
+  - STANDARD
 breaking:
   use:
-    - FILE
+  - FILE
 deps:
-  - buf.build/bufbuild/protovalidate
+- buf.build/bufbuild/protovalidate

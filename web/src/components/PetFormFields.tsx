@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PetStatus } from '../gen/pet/v1/pet_pb';
+import { PetStatus } from '../gen/pet/v2/pet_pb';
 import { PetImage } from './PetImage';
 import { acceptedPhotoTypes, mockUploadPhoto } from '../lib/photos';
 import { errorMessage } from '../lib/errors';

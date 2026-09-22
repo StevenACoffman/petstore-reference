@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package pet.v2;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/example/pets/gen/go/pet/v2;petv2";
+
+enum PetStatus {
+  PET_STATUS_UNSPECIFIED = 0;
+  PET_STATUS_AVAILABLE = 1;
+  PET_STATUS_PENDING = 2;
+  PET_STATUS_ADOPTED = 3;
+}
+
+message Pet {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string name = 2 [(buf.validate.field).string = {min_len: 1, max_len: 100}];
+  string species = 3 [(buf.validate.field).string = {min_len: 1, max_len: 50}];
+  string birth_date = 4 [(buf.validate.field).string.pattern = "^(\\d{4}-\\d{2}-\\d{2})?$"];
+  PetStatus status = 5 [(buf.validate.field).enum.defined_only = true];
+  repeated string photo_urls = 6 [(buf.validate.field).repeated.items.string.uri = true];
+  repeated string tags = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp modified_at = 9;
+  string created_by = 10;
+  string modified_by = 11;
+  bool birth_date_estimated = 12;
+}
+
+message CreatePetRequest {
+  string name = 1 [(buf.validate.field).string = {min_len: 1, max_len: 100}];
+  string species = 2 [(buf.validate.field).string = {min_len: 1, max_len: 50}];
+  string birth_date = 3 [(buf.validate.field).string.pattern = "^(\\d{4}-\\d{2}-\\d{2})?$"];
+  PetStatus status = 4 [(buf.validate.field).enum.defined_only = true];
+  repeated string photo_urls = 5 [(buf.validate.field).repeated.items.string.uri = true];
+  repeated string tags = 6;
+  bool birth_date_estimated = 7;
+}
+
+message CreatePetResponse {
+  Pet pet = 1;
+}
+
+message GetPetRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetPetResponse {
+  Pet pet = 1;
+}
+
+message ListPetsRequest {
+  // Filter by status (optional)
+  PetStatus status = 1;
+  // Filter by species (optional)
+  string species = 2;
+  // Maximum number of pets to return
+  int32 page_size = 3 [(buf.validate.field).int32 = {gte: 0, lte: 100}];
+
+  // Deprecated: offset paging skipped rows inserted between fetches and served
+  // others twice. Sending a non-zero value is rejected; use page_token.
+  int32 page = 4 [
+    deprecated = true,
+    (buf.validate.field).int32 = {gte: 0}
+  ];
+
+  // Opaque token from a previous response's next_page_token. Empty starts at the
+  // first page.
+  string page_token = 5;
+}
+
+message ListPetsResponse {
+  repeated Pet pets = 1;
+  // Pets matching the filters, ignoring the page token.
+  int32 total_count = 2;
+  // Token for the next page; empty when this is the last one.
+  string next_page_token = 3;
+}
+
+// UpdatePetRequest changes an existing pet.
+//
+// Partial updates are expressed with update_mask, following AIP-134:
+//
+//   - update_mask present: only the named paths are written. Every other field is
+//     left exactly as stored, whatever the request carries for it.
+//   - update_mask absent: full replacement, for backwards compatibility with
+//     clients that load a pet, edit it, and send the whole thing back.
+//
+// One deviation from strict full replacement, in both modes: a status of
+// PET_STATUS_UNSPECIFIED means "leave the status alone", never "reset to
+// available". A zero enum value is indistinguishable from an unsent one on the
+// wire, and silently moving an adopted pet back to available is never what a
+// caller meant.
+//
+// The scalar fields are `optional` so a partial request can omit them without
+// tripping the length and pattern rules below; those rules apply only to fields
+// the caller actually sends.
+message UpdatePetRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  optional string name = 2 [(buf.validate.field).string = {min_len: 1, max_len: 100}];
+  optional string species = 3 [(buf.validate.field).string = {min_len: 1, max_len: 50}];
+  optional string birth_date = 4 [(buf.validate.field).string.pattern = "^(\\d{4}-\\d{2}-\\d{2})?$"];
+  optional PetStatus status = 5 [(buf.validate.field).enum.defined_only = true];
+  repeated string photo_urls = 6 [(buf.validate.field).repeated.items.string.uri = true];
+  repeated string tags = 7;
+  optional bool birth_date_estimated = 8;
+
+  // Paths to write, e.g. "name", "tags". Absent means full replacement.
+  google.protobuf.FieldMask update_mask = 9;
+}
+
+message UpdatePetResponse {
+  Pet pet = 1;
+}
+
+message DeletePetRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message DeletePetResponse {
+  bool success = 1;
+}
+
+service PetService {
+  rpc CreatePet(CreatePetRequest) returns (CreatePetResponse);
+  rpc GetPet(GetPetRequest) returns (GetPetResponse);
+  rpc ListPets(ListPetsRequest) returns (ListPetsResponse);
+  rpc UpdatePet(UpdatePetRequest) returns (UpdatePetResponse);
+  rpc DeletePet(DeletePetRequest) returns (DeletePetResponse);
+}

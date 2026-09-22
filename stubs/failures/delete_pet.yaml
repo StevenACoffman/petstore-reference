@@ -1,5 +1,5 @@
 stubs:
   - id: delete-pet-permission-denied
-    target: pet.v1.PetService/DeletePet
+    target: pet.v2.PetService/DeletePet
     error_code: 7
     error_message: "permission denied: insufficient permissions to delete pet records"

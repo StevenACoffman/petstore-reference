@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,21 +16,32 @@ import (
 	"github.com/example/pets/internal/db"
 )
 
-func init() {
-	// Automatically detect and configure Colima socket on macOS if DOCKER_HOST is not set
-	if os.Getenv("DOCKER_HOST") == "" {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			colimaSock := filepath.Join(home, ".colima", "default", "docker.sock")
-			if _, err := os.Stat(colimaSock); err == nil {
-				_ = os.Setenv("DOCKER_HOST", "unix://"+colimaSock)
-				if os.Getenv("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE") == "" {
-					_ = os.Setenv("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
-				}
-			}
+// configureDockerHost points testcontainers at a Colima socket on macOS, unless
+// the caller already chose an endpoint or no socket exists.
+//
+// Called from StartTestDB rather than init(): init() runs in every binary linking
+// this package and a test cannot suppress its effect on the environment.
+func configureDockerHost() {
+	dockerHostOnce.Do(func() {
+		if os.Getenv("DOCKER_HOST") != "" {
+			return
 		}
-	}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return
+		}
+		colimaSock := filepath.Join(home, ".colima", "default", "docker.sock")
+		if _, err := os.Stat(colimaSock); err != nil {
+			return
+		}
+		_ = os.Setenv("DOCKER_HOST", "unix://"+colimaSock)
+		if os.Getenv("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE") == "" {
+			_ = os.Setenv("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
+		}
+	})
 }
+
+var dockerHostOnce sync.Once
 
 // TestDB wraps a PostgreSQL connection pool and optional Testcontainer instance.
 type TestDB struct {
@@ -40,6 +52,8 @@ type TestDB struct {
 // StartTestDB spins up a PostgreSQL testcontainer (or connects to DATABASE_URL if set),
 // applies all migrations, and returns the TestDB instance.
 func StartTestDB(ctx context.Context) (*TestDB, error) {
+	configureDockerHost()
+
 	dbURL := os.Getenv("DATABASE_URL")
 	var pgContainer *pgmodule.PostgresContainer
 

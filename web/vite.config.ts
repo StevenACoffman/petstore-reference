@@ -19,7 +19,7 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 4321,
       proxy: {
-        '/pet.v1.PetService': {
+        '/pet.v2.PetService': {
           target: backendTarget,
           changeOrigin: true,
           secure: false,

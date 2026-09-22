@@ -1,6 +1,6 @@
 import { createClient, Transport } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
-import { PetService } from "../gen/pet/v1/pet_pb";
+import { PetService } from "../gen/pet/v2/pet_pb";
 
 export function getApiBaseUrl(): string {
   if (typeof process !== "undefined" && process.env?.VITE_API_URL) {

@@ -1,6 +1,6 @@
 stubs:
   - id: delete-pet
-    target: pet.v1.PetService/DeletePet
+    target: pet.v2.PetService/DeletePet
     cel_content: |
       {
         'success': true

@@ -517,3 +517,7 @@ components:
 security: []
 tags:
   - name: pet.v1.PetService
+    description: |-
+      Deprecated: superseded by pet.v2, which fixes destructive updates and offset
+       paging. This schema is retained so buf's compatibility guarantee still holds for
+       anyone generating against v1; the server no longer serves it.

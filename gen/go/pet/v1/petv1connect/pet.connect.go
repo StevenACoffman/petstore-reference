@@ -46,6 +46,8 @@ const (
 )
 
 // PetServiceClient is a client for the pet.v1.PetService service.
+//
+// Deprecated: do not use.
 type PetServiceClient interface {
 	CreatePet(context.Context, *connect.Request[v1.CreatePetRequest]) (*connect.Response[v1.CreatePetResponse], error)
 	GetPet(context.Context, *connect.Request[v1.GetPetRequest]) (*connect.Response[v1.GetPetResponse], error)
@@ -61,6 +63,8 @@ type PetServiceClient interface {
 //
 // The URL supplied here should be the base URL for the Connect or gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
+//
+// Deprecated: do not use.
 func NewPetServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) PetServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
 	petServiceMethods := v1.File_pet_v1_pet_proto.Services().ByName("PetService").Methods()
@@ -133,6 +137,8 @@ func (c *petServiceClient) DeletePet(ctx context.Context, req *connect.Request[v
 }
 
 // PetServiceHandler is an implementation of the pet.v1.PetService service.
+//
+// Deprecated: do not use.
 type PetServiceHandler interface {
 	CreatePet(context.Context, *connect.Request[v1.CreatePetRequest]) (*connect.Response[v1.CreatePetResponse], error)
 	GetPet(context.Context, *connect.Request[v1.GetPetRequest]) (*connect.Response[v1.GetPetResponse], error)
@@ -146,6 +152,8 @@ type PetServiceHandler interface {
 //
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
+//
+// Deprecated: do not use.
 func NewPetServiceHandler(svc PetServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	petServiceMethods := v1.File_pet_v1_pet_proto.Services().ByName("PetService").Methods()
 	petServiceCreatePetHandler := connect.NewUnaryHandler(

@@ -1,32 +1,148 @@
 version: "2"
 linters:
   enable:
-    - gosec
-    - testifylint
+  # Correctness
+  - bodyclose
+  - contextcheck
+  - durationcheck
+  - errcheck
+  - errorlint
+  - exhaustive
+  - fatcontext
+  - forcetypeassert
+  - makezero
+  - nilerr
+  - nilnesserr
+  - noctx
+  - protogetter
+  - reassign
+  - rowserrcheck
+  - spancheck
+  - sqlclosecheck
+  - wastedassign
+  # Security
+  - gosec
+  # Tests
+  - paralleltest
+  - testifylint
+  - thelper
+  - tparallel
+  - usetesting
+  # Clarity / modern Go
+  - copyloopvar
+  - dupword
+  - gocritic
+  - intrange
+  - misspell
+  - modernize
+  - perfsprint
+  - predeclared
+  - revive
+  - sloglint
+  - unconvert
+  - usestdlibvars
+  # Hygiene
+  - forbidigo
+  - gochecknoinits
+  - nolintlint
   settings:
+    forbidigo:
+      # depguard cannot express this: it matches import paths by prefix, so a rule
+      # denying "log" also denies "log/slog". Forbidding the call site instead is
+      # precise and catches a regression back to unstructured logging.
+      forbid:
+      - pattern: ^log\.(Print|Fatal|Panic|New|Default|Set|Flags|Prefix|Writer)
+        msg: use log/slog (see internal/logging); the stdlib log package is unstructured
+    errcheck:
+      check-type-assertions: true
+    exhaustive:
+      default-signifies-exhaustive: true
+    gocritic:
+      enabled-tags:
+      - diagnostic
+      - opinionated
+      - performance
+      - style
+      disabled-checks:
+      # Conflicts with the repo's existing named-result and long-comment style.
+      - whyNoLint
+      - hugeParam
     gosec:
       severity: medium
       confidence: medium
+    govet:
+      enable-all: true
+      disable:
+      # fieldalignment reorders struct fields for packing; readability wins here.
+      - fieldalignment
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    revive:
+      rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: empty-block
+      - name: error-naming
+      - name: error-return
+      - name: error-strings
+      - name: errorf
+      - name: increment-decrement
+      - name: indent-error-flow
+      - name: package-comments
+        disabled: true
+      - name: range
+      - name: receiver-naming
+      - name: redefines-builtin-id
+      - name: superfluous-else
+      - name: time-naming
+      - name: unexported-return
+      - name: unreachable-code
+      - name: unused-parameter
+      - name: var-declaration
+      - name: var-naming
+    sloglint:
+      no-mixed-args: true
+      kv-only: true
+      static-msg: false
+      no-raw-keys: false
+      key-naming-case: snake
     testifylint:
       enable-all: true
   exclusions:
     generated: lax
     presets:
-      - comments
-      - common-false-positives
-      - legacy
-      - std-error-handling
+    - comments
+    - common-false-positives
+    - legacy
+    - std-error-handling
     paths:
-      - gen
-      - internal/db
-      - web
-      - third_party$
-      - builtin$
-      - examples$
+    - gen
+    - internal/db
+    - web
+    - third_party$
+    - builtin$
+    - examples$
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
 formatters:
+  enable:
+  - gofmt
+  - goimports
+  settings:
+    goimports:
+      local-prefixes:
+      - github.com/example/pets
   exclusions:
     generated: lax
     paths:
-      - third_party$
-      - builtin$
-      - examples$
+    - gen
+    - internal/db
+    - web
+    - third_party$
+    - builtin$
+    - examples$

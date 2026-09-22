@@ -14,3 +14,7 @@ golangci-lint = "2.13.2"
 "go:golang.org/x/vuln/cmd/govulncheck" = "latest"
 "go:github.com/pressly/goose/v3/cmd/goose" = "latest"
 mkcert = "1.4.4"
+lefthook = "2.1.14"
+# mutago publishes darwin-only release binaries, so it is built from source here;
+# that keeps the Linux CI runners working too.
+"go:github.com/quality-gates/mutago/v2/cmd/mutago" = "2.10.15"

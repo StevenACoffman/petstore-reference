@@ -11,24 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countPets = `-- name: CountPets :one
-SELECT COUNT(*) FROM pets
-WHERE ($1::text IS NULL OR status = $1)
-  AND ($2::text IS NULL OR species = $2)
-`
-
-type CountPetsParams struct {
-	Status  pgtype.Text `json:"status"`
-	Species pgtype.Text `json:"species"`
-}
-
-func (q *Queries) CountPets(ctx context.Context, arg CountPetsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPets, arg.Status, arg.Species)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createPet = `-- name: CreatePet :one
 INSERT INTO pets (
     name, species, birth_date, birth_date_estimated, status, photo_urls, tags, created_at, modified_at, created_by, modified_by
@@ -119,24 +101,58 @@ func (q *Queries) GetPet(ctx context.Context, id pgtype.UUID) (Pet, error) {
 }
 
 const listPets = `-- name: ListPets :many
-SELECT id, name, species, birth_date, birth_date_estimated, status, tags, created_at, modified_at, created_by, modified_by, photo_urls FROM pets
-WHERE ($3::text IS NULL OR status = $3)
-  AND ($4::text IS NULL OR species = $4)
+WITH filtered AS (
+    SELECT id, name, species, birth_date, birth_date_estimated, status, tags, created_at, modified_at, created_by, modified_by, photo_urls, COUNT(*) OVER () AS total_count
+    FROM pets
+    WHERE ($4::text IS NULL OR status = $4)
+      AND ($5::text IS NULL OR species = $5)
+)
+SELECT id, name, species, birth_date, birth_date_estimated, status, tags, created_at, modified_at, created_by, modified_by, photo_urls, total_count FROM filtered
+WHERE (
+    $1::timestamptz IS NULL
+    OR (created_at, id) < ($1::timestamptz, $2::uuid)
+)
 ORDER BY created_at DESC, id DESC
-LIMIT $1 OFFSET $2
+LIMIT $3
 `
 
 type ListPetsParams struct {
-	Limit   int32       `json:"limit"`
-	Offset  int32       `json:"offset"`
-	Status  pgtype.Text `json:"status"`
-	Species pgtype.Text `json:"species"`
+	CursorCreatedAt pgtype.Timestamptz `json:"cursor_created_at"`
+	CursorID        pgtype.UUID        `json:"cursor_id"`
+	PageSize        int32              `json:"page_size"`
+	Status          pgtype.Text        `json:"status"`
+	Species         pgtype.Text        `json:"species"`
 }
 
-func (q *Queries) ListPets(ctx context.Context, arg ListPetsParams) ([]Pet, error) {
+type ListPetsRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	Name               string             `json:"name"`
+	Species            string             `json:"species"`
+	BirthDate          pgtype.Date        `json:"birth_date"`
+	BirthDateEstimated bool               `json:"birth_date_estimated"`
+	Status             string             `json:"status"`
+	Tags               []string           `json:"tags"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	ModifiedAt         pgtype.Timestamptz `json:"modified_at"`
+	CreatedBy          string             `json:"created_by"`
+	ModifiedBy         string             `json:"modified_by"`
+	PhotoUrls          []string           `json:"photo_urls"`
+	TotalCount         int64              `json:"total_count"`
+}
+
+// Cursor paging: (created_at, id) is a total order because id is unique, so a row
+// inserted between fetches cannot shift the window the way OFFSET did.
+//
+// COUNT(*) OVER() sits inside the CTE, over the filter-matching rows only. Putting
+// it outside the cursor predicate would count the remainder after the cursor and
+// silently report the wrong total. The window still scans the filtered set on every
+// page, exactly as the old separate CountPets did; that is the first thing to drop
+// if this table ever grows.
+func (q *Queries) ListPets(ctx context.Context, arg ListPetsParams) ([]ListPetsRow, error) {
 	rows, err := q.db.Query(ctx, listPets,
-		arg.Limit,
-		arg.Offset,
+		arg.CursorCreatedAt,
+		arg.CursorID,
+		arg.PageSize,
 		arg.Status,
 		arg.Species,
 	)
@@ -144,9 +160,9 @@ func (q *Queries) ListPets(ctx context.Context, arg ListPetsParams) ([]Pet, erro
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Pet{}
+	items := []ListPetsRow{}
 	for rows.Next() {
-		var i Pet
+		var i ListPetsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -160,6 +176,7 @@ func (q *Queries) ListPets(ctx context.Context, arg ListPetsParams) ([]Pet, erro
 			&i.CreatedBy,
 			&i.ModifiedBy,
 			&i.PhotoUrls,
+			&i.TotalCount,
 		); err != nil {
 			return nil, err
 		}
@@ -171,78 +188,53 @@ func (q *Queries) ListPets(ctx context.Context, arg ListPetsParams) ([]Pet, erro
 	return items, nil
 }
 
-const touchPet = `-- name: TouchPet :one
-UPDATE pets
-SET modified_at = NOW(),
-    modified_by = $2
-WHERE id = $1
-RETURNING id, name, species, birth_date, birth_date_estimated, status, tags, created_at, modified_at, created_by, modified_by, photo_urls
-`
-
-type TouchPetParams struct {
-	ID         pgtype.UUID `json:"id"`
-	ModifiedBy string      `json:"modified_by"`
-}
-
-func (q *Queries) TouchPet(ctx context.Context, arg TouchPetParams) (Pet, error) {
-	row := q.db.QueryRow(ctx, touchPet, arg.ID, arg.ModifiedBy)
-	var i Pet
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Species,
-		&i.BirthDate,
-		&i.BirthDateEstimated,
-		&i.Status,
-		&i.Tags,
-		&i.CreatedAt,
-		&i.ModifiedAt,
-		&i.CreatedBy,
-		&i.ModifiedBy,
-		&i.PhotoUrls,
-	)
-	return i, err
-}
-
 const updatePet = `-- name: UpdatePet :one
 UPDATE pets
 SET
-    name = $2,
-    species = $3,
-    birth_date = $4,
-    birth_date_estimated = $5,
-    status = $6,
-    photo_urls = $7,
-    tags = $8,
+    name = COALESCE($1, name),
+    species = COALESCE($2, species),
+    birth_date = CASE WHEN $3::bool
+                      THEN $4::date
+                      ELSE birth_date END,
+    birth_date_estimated = COALESCE($5, birth_date_estimated),
+    status = COALESCE($6, status),
+    photo_urls = COALESCE($7::text[], photo_urls),
+    tags = COALESCE($8::text[], tags),
     modified_at = NOW(),
     modified_by = $9
-WHERE id = $1
+WHERE id = $10
 RETURNING id, name, species, birth_date, birth_date_estimated, status, tags, created_at, modified_at, created_by, modified_by, photo_urls
 `
 
 type UpdatePetParams struct {
-	ID                 pgtype.UUID `json:"id"`
-	Name               string      `json:"name"`
-	Species            string      `json:"species"`
+	Name               pgtype.Text `json:"name"`
+	Species            pgtype.Text `json:"species"`
+	SetBirthDate       bool        `json:"set_birth_date"`
 	BirthDate          pgtype.Date `json:"birth_date"`
-	BirthDateEstimated bool        `json:"birth_date_estimated"`
-	Status             string      `json:"status"`
+	BirthDateEstimated pgtype.Bool `json:"birth_date_estimated"`
+	Status             pgtype.Text `json:"status"`
 	PhotoUrls          []string    `json:"photo_urls"`
 	Tags               []string    `json:"tags"`
 	ModifiedBy         string      `json:"modified_by"`
+	ID                 pgtype.UUID `json:"id"`
 }
 
+// A NULL parameter means "leave this column as it is", so one statement serves
+// both a partial and a full update without a read-modify-write cycle.
+// birth_date needs an explicit flag rather than COALESCE because it is nullable:
+// for it, NULL is a legitimate value to store, not an absence of instruction.
 func (q *Queries) UpdatePet(ctx context.Context, arg UpdatePetParams) (Pet, error) {
 	row := q.db.QueryRow(ctx, updatePet,
-		arg.ID,
 		arg.Name,
 		arg.Species,
+		arg.SetBirthDate,
 		arg.BirthDate,
 		arg.BirthDateEstimated,
 		arg.Status,
 		arg.PhotoUrls,
 		arg.Tags,
 		arg.ModifiedBy,
+		arg.ID,
 	)
 	var i Pet
 	err := row.Scan(

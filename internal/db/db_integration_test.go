@@ -1,3 +1,5 @@
+//go:build integration
+
 package db_test
 
 import (
@@ -179,31 +181,26 @@ func (s *DBTestSuite) TestPetQueries() {
 	s.Equal("Buddy", fetched.Name)
 	s.Equal([]string{"https://example.com/buddy.jpg"}, fetched.PhotoUrls)
 
-	// 3. CountPets & ListPets
-	count, err := queries.CountPets(s.ctx, db.CountPetsParams{
-		Species: pgtype.Text{String: "Dog", Valid: true},
-	})
-	s.Require().NoError(err)
-	s.Equal(int64(1), count)
-
+	// 3. ListPets carries its own total, so no second count query is needed.
 	pets, err := queries.ListPets(s.ctx, db.ListPetsParams{
-		Limit:   10,
-		Offset:  0,
-		Species: pgtype.Text{String: "Dog", Valid: true},
+		PageSize: 10,
+		Species:  pgtype.Text{String: "Dog", Valid: true},
 	})
 	s.Require().NoError(err)
 	s.Len(pets, 1)
 	s.Equal(created.ID, pets[0].ID)
 	s.Equal([]string{"https://example.com/buddy.jpg"}, pets[0].PhotoUrls)
+	s.Equal(int64(1), pets[0].TotalCount, "the window total counts the filter")
 
-	// 4. UpdatePet
+	// 4. UpdatePet writes every column when every parameter is supplied.
 	updated, err := queries.UpdatePet(s.ctx, db.UpdatePetParams{
 		ID:                 created.ID,
-		Name:               "Buddy The Best",
-		Species:            "Dog",
+		Name:               pgtype.Text{String: "Buddy The Best", Valid: true},
+		Species:            pgtype.Text{String: "Dog", Valid: true},
+		SetBirthDate:       true,
 		BirthDate:          created.BirthDate,
-		BirthDateEstimated: true,
-		Status:             "PET_STATUS_ADOPTED",
+		BirthDateEstimated: pgtype.Bool{Bool: true, Valid: true},
+		Status:             pgtype.Text{String: "PET_STATUS_ADOPTED", Valid: true},
 		PhotoUrls:          []string{"https://example.com/buddy2.jpg"},
 		Tags:               []string{"adopted"},
 		ModifiedBy:         "admin@example.com",
@@ -214,15 +211,24 @@ func (s *DBTestSuite) TestPetQueries() {
 	s.Equal([]string{"https://example.com/buddy2.jpg"}, updated.PhotoUrls)
 	s.True(updated.BirthDateEstimated)
 
-	// 5. TouchPet
-	touched, err := queries.TouchPet(s.ctx, db.TouchPetParams{
+	// 4b. A partial update: only the name parameter is supplied, so every other
+	// column must survive untouched. This is the SQL-level guarantee that the
+	// handler's update_mask support is built on.
+	renamed, err := queries.UpdatePet(s.ctx, db.UpdatePetParams{
 		ID:         created.ID,
-		ModifiedBy: "modifier@example.com",
+		Name:       pgtype.Text{String: "Buddy Renamed", Valid: true},
+		ModifiedBy: "renamer@example.com",
 	})
 	s.Require().NoError(err)
-	s.Equal("modifier@example.com", touched.ModifiedBy)
+	s.Equal("Buddy Renamed", renamed.Name)
+	s.Equal("Dog", renamed.Species, "species must survive a name-only update")
+	s.Equal("PET_STATUS_ADOPTED", renamed.Status, "status must survive a name-only update")
+	s.Equal([]string{"adopted"}, renamed.Tags, "tags must survive a name-only update")
+	s.Equal([]string{"https://example.com/buddy2.jpg"}, renamed.PhotoUrls)
+	s.True(renamed.BirthDateEstimated)
+	s.Equal(created.BirthDate, renamed.BirthDate, "birth_date must survive a name-only update")
 
-	// 6. DeletePet
+	// 5. DeletePet
 	rowsAffected, err := queries.DeletePet(s.ctx, created.ID)
 	s.Require().NoError(err)
 	s.Equal(int64(1), rowsAffected)

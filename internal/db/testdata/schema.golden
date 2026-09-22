@@ -1,0 +1,6 @@
+CONSTRAINT pets pets_pkey PRIMARY KEY
+CONSTRAINT pets pets_status_check CHECK
+INDEX CREATE INDEX idx_pets_species ON public.pets USING btree (species)
+INDEX CREATE INDEX idx_pets_status ON public.pets USING btree (status)
+INDEX CREATE UNIQUE INDEX pets_pkey ON public.pets USING btree (id)
+TABLE pets (birth_date date, birth_date_estimated boolean NOT NULL DEFAULT false, created_at timestamp with time zone NOT NULL DEFAULT now(), created_by character varying NOT NULL, id uuid NOT NULL DEFAULT gen_random_uuid(), modified_at timestamp with time zone NOT NULL DEFAULT now(), modified_by character varying NOT NULL, name character varying NOT NULL, photo_urls ARRAY NOT NULL DEFAULT '{}'::text[], species character varying NOT NULL, status character varying NOT NULL DEFAULT 'PET_STATUS_AVAILABLE'::character varying, tags ARRAY NOT NULL DEFAULT '{}'::text[])

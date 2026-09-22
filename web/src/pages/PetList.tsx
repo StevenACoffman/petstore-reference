@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation } from '@connectrpc/connect-query';
 import { useQueryClient } from '@tanstack/react-query';
-import { PetService, PetStatus } from '../gen/pet/v1/pet_pb';
+import { PetService, PetStatus } from '../gen/pet/v2/pet_pb';
 import { Layout } from '../components/Layout';
 import { PetImage } from '../components/PetImage';
 import { formatTimestamp, calculateAge } from '../lib/date';
@@ -12,12 +12,15 @@ export const PetList: React.FC = () => {
   const [currentFilter, setCurrentFilter] = useState<'all' | '1' | '2' | '3'>('all');
   const [speciesFilter, setSpeciesFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [currentPage, setCurrentPage] = useState(0);
+  // Cursor paging is forward-only, so "previous" is a pop off the stack of tokens
+  // we have already followed. An empty stack is the first page.
+  const [pageTokens, setPageTokens] = useState<string[]>([]);
   const pageSize = 20;
+  const currentPage = pageTokens.length;
 
   const { data, isLoading, error, refetch } = useQuery(PetService.method.listPets, {
     pageSize,
-    page: currentPage,
+    pageToken: pageTokens[pageTokens.length - 1] ?? '',
     status:
       currentFilter === 'all'
         ? PetStatus.UNSPECIFIED
@@ -26,7 +29,7 @@ export const PetList: React.FC = () => {
   });
 
   useEffect(() => {
-    setCurrentPage(0);
+    setPageTokens([]);
   }, [currentFilter, speciesFilter]);
 
   const deleteMutation = useMutation(PetService.method.deletePet, {
@@ -41,12 +44,7 @@ export const PetList: React.FC = () => {
   const pets = data?.pets || [];
   const totalCount = data?.totalCount || 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-
-  useEffect(() => {
-    if (currentPage >= totalPages) {
-      setCurrentPage(totalPages - 1);
-    }
-  }, [currentPage, totalPages]);
+  const nextPageToken = data?.nextPageToken || '';
 
   const filteredPets = useMemo(() => {
     let list = pets;
@@ -351,7 +349,7 @@ export const PetList: React.FC = () => {
               <button
                 className="btn btn-secondary"
                 disabled={currentPage === 0}
-                onClick={() => setCurrentPage((page) => Math.max(0, page - 1))}
+                onClick={() => setPageTokens((tokens) => tokens.slice(0, -1))}
               >
                 Previous
               </button>
@@ -360,8 +358,8 @@ export const PetList: React.FC = () => {
               </span>
               <button
                 className="btn btn-secondary"
-                disabled={currentPage + 1 >= totalPages}
-                onClick={() => setCurrentPage((page) => page + 1)}
+                disabled={!nextPageToken}
+                onClick={() => setPageTokens((tokens) => [...tokens, nextPageToken])}
               >
                 Next
               </button>

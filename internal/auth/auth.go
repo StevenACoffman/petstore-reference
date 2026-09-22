@@ -33,7 +33,15 @@ func WithClaims(ctx context.Context, claims *Claims) context.Context {
 	return context.WithValue(ctx, claimsKey, claims)
 }
 
-const DefaultDevEmail = "developer@local.test"
+const (
+	DefaultDevEmail   = "developer@local.test"
+	DefaultDevSubject = "dev-user-001"
+)
+
+// DefaultDevRoles is the local development identity: an admin, so a deny-by-default
+// authorization policy does not lock a developer out of their own server. Narrow it
+// with DEV_ROLES to feel what a non-admin caller feels.
+func DefaultDevRoles() []string { return []string{"user", "admin"} }
 
 // UserEmailFromContext retrieves the authenticated user's email.
 func UserEmailFromContext(ctx context.Context) (string, bool) {
@@ -43,25 +51,32 @@ func UserEmailFromContext(ctx context.Context) (string, bool) {
 	return "", false
 }
 
-// DevIdentityMiddleware returns an HTTP middleware that injects local development identity headers
-// (simulating an upstream Google Cloud IAP or OAuth2 proxy) when no identity headers are present on the request.
-func DevIdentityMiddleware(devEmail, devSubject string) func(http.Handler) http.Handler {
+// DevIdentityMiddleware injects local development identity headers when a request
+// carries none, simulating an upstream oauth2-proxy.
+//
+// It simulates oauth2-proxy rather than IAP because IAP conveys no group
+// membership: an IAP simulation could never exercise a role other than the one
+// hardcoded for it, which would leave authorization untestable locally.
+func DevIdentityMiddleware(devEmail, devSubject string, devRoles []string) func(http.Handler) http.Handler {
 	if devEmail == "" {
 		devEmail = DefaultDevEmail
 	}
 	if devSubject == "" {
-		devSubject = "dev-user-001"
+		devSubject = DefaultDevSubject
 	}
+	if len(devRoles) == 0 {
+		devRoles = DefaultDevRoles()
+	}
+	groups := strings.Join(devRoles, ",")
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Only inject if no identity or authorization headers are already present
 			if r.Header.Get("X-Goog-Authenticated-User-Email") == "" &&
 				r.Header.Get("X-Forwarded-Email") == "" &&
 				r.Header.Get("Authorization") == "" {
-				r.Header.Set("X-Goog-Authenticated-User-Email", "accounts.google.com:"+devEmail)
-				r.Header.Set("X-Goog-Authenticated-User-Id", "accounts.google.com:"+devSubject)
 				r.Header.Set("X-Forwarded-Email", devEmail)
 				r.Header.Set("X-Forwarded-User", devSubject)
+				r.Header.Set("X-Forwarded-Groups", groups)
 			}
 			next.ServeHTTP(w, r)
 		})
@@ -83,7 +98,7 @@ type Config struct {
 	// StaticTokens is an optional list of valid bearer tokens (e.g. for service-to-service or CLI).
 	StaticTokens []string
 
-	// SkipProcedures is a set of RPC procedures that bypass authentication (e.g. "/pet.v1.PetService/GetPet").
+	// SkipProcedures is a set of RPC procedures that bypass authentication (e.g. "/pet.v2.PetService/GetPet").
 	SkipProcedures map[string]bool
 
 	// Validator is an optional custom token/JWT validator (e.g. for verifying Google IAP JWT assertion).
@@ -111,24 +126,6 @@ func NewInterceptor(cfg Config) connect.UnaryInterceptorFunc {
 			}
 			return next(WithClaims(ctx, claims), req)
 		}
-	}
-}
-
-// Middleware applies the same authentication policy to ordinary HTTP handlers.
-func Middleware(cfg Config) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !cfg.Enabled {
-				next.ServeHTTP(w, r.WithContext(WithClaims(r.Context(), &Claims{Subject: "anonymous", Email: "anonymous", Provider: "disabled"})))
-				return
-			}
-			claims, err := authenticate(r.Context(), r.Header, cfg)
-			if err != nil {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(WithClaims(r.Context(), claims)))
-		})
 	}
 }
 
@@ -177,8 +174,15 @@ func authenticate(ctx context.Context, header http.Header, cfg Config) (*Claims,
 		return nil, errors.New("invalid or expired bearer token")
 	}
 
+	// Reached only when DevIdentityMiddleware is not in front of this; the roles
+	// match it so the two dev identities cannot disagree.
 	if cfg.DevMode {
-		return &Claims{Subject: "dev-user", Email: DefaultDevEmail, Provider: "dev", Roles: []string{"user", "admin"}}, nil
+		return &Claims{
+			Subject:  DefaultDevSubject,
+			Email:    DefaultDevEmail,
+			Provider: "dev",
+			Roles:    DefaultDevRoles(),
+		}, nil
 	}
 	return nil, errors.New("missing authentication credentials")
 }

@@ -1,18 +1,58 @@
+// Package config reads the service's runtime settings.
 package config
 
 import (
-	"os"
 	"slices"
 	"strconv"
 	"strings"
 )
 
+// Environment variables recognised by Load.
+const (
+	EnvPort              = "PORT"
+	EnvDatabaseURL       = "DATABASE_URL"
+	EnvAppEnv            = "APP_ENV"
+	EnvDevMode           = "DEV_MODE"
+	EnvAutoMigrate       = "AUTO_MIGRATE"
+	EnvDevEmail          = "DEV_EMAIL"
+	EnvDevRoles          = "DEV_ROLES"
+	EnvAuthzPolicy       = "AUTHZ_POLICY"
+	EnvAuthEnabled       = "AUTH_ENABLED"
+	EnvAuthTokens        = "AUTH_TOKENS"
+	EnvTrustProxyHeaders = "TRUST_PROXY_HEADERS"
+	EnvAllowedOrigins    = "CORS_ALLOWED_ORIGINS"
+	EnvTLSCertFile       = "TLS_CERT_FILE"
+	EnvTLSKeyFile        = "TLS_KEY_FILE"
+	EnvLogLevel          = "LOG_LEVEL"
+	EnvLogFormat         = "LOG_FORMAT"
+	EnvAdminAddr         = "ADMIN_ADDR"
+	EnvTraceSnapshotDir  = "TRACE_SNAPSHOT_DIR"
+	EnvRateLimitRPS      = "RATE_LIMIT_RPS"
+)
+
+// Defaults applied when the environment says nothing.
+const (
+	DefaultPort        = "8080"
+	DefaultDatabaseURL = "postgres://postgres:password@localhost:5432/pets_db?sslmode=disable"
+	DefaultDevEmail    = "developer@local.test"
+	DefaultDevToken    = "dev-secret-token"
+	DefaultCertFile    = ".certs/cert.pem"
+	DefaultKeyFile     = ".certs/key.pem"
+	// DefaultAdminAddr is loopback: pprof must not be reachable off-host by default.
+	DefaultAdminAddr = "127.0.0.1:9090"
+	// DefaultRateLimitRPS per instance; RATE_LIMIT_RPS=0 disables it.
+	DefaultRateLimitRPS uint = 200
+)
+
 type Config struct {
-	Port              string
-	DatabaseURL       string
-	AuthEnabled       bool
-	DevMode           bool
-	DevEmail          string
+	Port        string
+	DatabaseURL string
+	AuthEnabled bool
+	DevMode     bool
+	DevEmail    string
+	// DevRoles is the local development identity's role set. Narrow it to feel what
+	// a non-admin caller feels.
+	DevRoles          []string
 	AuthTokens        []string
 	TrustProxyHeaders bool
 	AllowedOrigins    []string
@@ -21,48 +61,47 @@ type Config struct {
 	AutoMigrate       bool
 	LogLevel          string
 	LogFormat         string
+
+	// AdminAddr serves metrics, pprof and trace snapshots; "off" disables it.
+	AdminAddr string
+	// TraceSnapshotDir enables the flight recorder and names its output directory.
+	TraceSnapshotDir string
+	// RateLimitRPS admitted per instance; zero disables admission control.
+	RateLimitRPS uint
+	// AuthzPolicy is the raw role matrix, procedure=role[,role] separated by
+	// semicolons or newlines. Empty denies everything but admin.
+	AuthzPolicy string
 }
 
-func Load() *Config {
-	port := getEnv("PORT", "8080")
-	dbURL := getEnv("DATABASE_URL", "postgres://postgres:password@localhost:5432/pets_db?sslmode=disable")
+// AdminEnabled reports whether the admin listener should be started.
+func (c *Config) AdminEnabled() bool {
+	return c.AdminAddr != "" && !strings.EqualFold(c.AdminAddr, "off")
+}
 
-	env := getEnv("APP_ENV", "development")
-	devMode := env != "production"
-	if val := os.Getenv("DEV_MODE"); val != "" {
-		if parsed, err := strconv.ParseBool(val); err == nil {
-			devMode = parsed
-		}
+// Load builds a Config from the environment exposed by getenv.
+//
+// getenv is a parameter, not os.Getenv, so tests pass a map instead of calling
+// t.Setenv and can run in parallel. A nil getenv means an empty environment.
+//
+// Development is the default so an unconfigured checkout runs. APP_ENV=production
+// (or DEV_MODE=false) switches posture, and there no credential, token, or CORS
+// origin is ever invented — an operator must name them.
+func Load(getenv func(string) string) *Config {
+	if getenv == nil {
+		getenv = func(string) string { return "" }
 	}
 
-	autoMigrate := devMode
-	if val := os.Getenv("AUTO_MIGRATE"); val != "" {
-		if parsed, err := strconv.ParseBool(val); err == nil {
-			autoMigrate = parsed
-		}
+	devMode := getenv(EnvAppEnv) != "production"
+	devMode = boolOr(getenv(EnvDevMode), devMode)
+
+	tokens := getenv(EnvAuthTokens)
+	if tokens == "" && devMode {
+		tokens = DefaultDevToken
 	}
 
-	devEmail := getEnv("DEV_EMAIL", "developer@local.test")
-
-	authEnabled := true
-	if val := os.Getenv("AUTH_ENABLED"); val != "" {
-		if parsed, err := strconv.ParseBool(val); err == nil {
-			authEnabled = parsed
-		}
-	}
-
-	tokensStr := os.Getenv("AUTH_TOKENS")
-	if tokensStr == "" && devMode {
-		tokensStr = "dev-secret-token"
-	}
-	tokens := splitNonEmpty(tokensStr)
-
-	trustProxyHeaders := false
-	if val := os.Getenv("TRUST_PROXY_HEADERS"); val != "" {
-		trustProxyHeaders, _ = strconv.ParseBool(val)
-	}
-
-	allowedOrigins := splitNonEmpty(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	allowedOrigins := splitNonEmpty(getenv(EnvAllowedOrigins))
+	// Credentialed CORS forbids "*", so drop it rather than emit a config the
+	// browser will reject.
 	allowedOrigins = slices.DeleteFunc(allowedOrigins, func(origin string) bool {
 		return origin == "*"
 	})
@@ -70,35 +109,43 @@ func Load() *Config {
 		allowedOrigins = []string{"https://localhost:4321", "http://localhost:4321"}
 	}
 
-	certFile := getEnv("TLS_CERT_FILE", ".certs/cert.pem")
-	keyFile := getEnv("TLS_KEY_FILE", ".certs/key.pem")
-
-	defaultLogLevel := "info"
-	defaultLogFormat := "json"
+	logLevel, logFormat := "info", "json"
 	if devMode {
-		defaultLogLevel = "debug"
-		defaultLogFormat = "text"
+		logLevel, logFormat = "debug", "text"
 	}
-	logLevel := getEnv("LOG_LEVEL", defaultLogLevel)
-	logFormat := getEnv("LOG_FORMAT", defaultLogFormat)
 
 	return &Config{
-		Port:              port,
-		DatabaseURL:       dbURL,
-		AuthEnabled:       authEnabled,
+		Port:              stringOr(getenv(EnvPort), DefaultPort),
+		DatabaseURL:       stringOr(getenv(EnvDatabaseURL), DefaultDatabaseURL),
+		AuthEnabled:       boolOr(getenv(EnvAuthEnabled), true),
 		DevMode:           devMode,
-		DevEmail:          devEmail,
-		AuthTokens:        tokens,
-		TrustProxyHeaders: trustProxyHeaders,
+		DevEmail:          stringOr(getenv(EnvDevEmail), DefaultDevEmail),
+		DevRoles:          splitNonEmpty(getenv(EnvDevRoles)),
+		AuthTokens:        splitNonEmpty(tokens),
+		TrustProxyHeaders: boolOr(getenv(EnvTrustProxyHeaders), false),
 		AllowedOrigins:    allowedOrigins,
-		CertFile:          certFile,
-		KeyFile:           keyFile,
-		AutoMigrate:       autoMigrate,
-		LogLevel:          logLevel,
-		LogFormat:         logFormat,
+		CertFile:          stringOr(getenv(EnvTLSCertFile), DefaultCertFile),
+		KeyFile:           stringOr(getenv(EnvTLSKeyFile), DefaultKeyFile),
+		AutoMigrate:       boolOr(getenv(EnvAutoMigrate), devMode),
+		LogLevel:          stringOr(getenv(EnvLogLevel), logLevel),
+		LogFormat:         stringOr(getenv(EnvLogFormat), logFormat),
+		AdminAddr:         stringOr(getenv(EnvAdminAddr), DefaultAdminAddr),
+		TraceSnapshotDir:  getenv(EnvTraceSnapshotDir),
+		RateLimitRPS:      uintOr(getenv(EnvRateLimitRPS), DefaultRateLimitRPS),
+		AuthzPolicy:       getenv(EnvAuthzPolicy),
 	}
 }
 
+// Validate rejects a configuration that would refuse every request: authentication
+// enabled in production with no credential source.
+func (c *Config) Validate() error {
+	if c.AuthEnabled && !c.DevMode && !c.TrustProxyHeaders && len(c.AuthTokens) == 0 {
+		return errNoCredentialSource
+	}
+	return nil
+}
+
+// splitNonEmpty splits a comma-separated list, discarding blanks.
 func splitNonEmpty(value string) []string {
 	var values []string
 	for part := range strings.SplitSeq(value, ",") {
@@ -109,9 +156,35 @@ func splitNonEmpty(value string) []string {
 	return values
 }
 
-func getEnv(key, defaultVal string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
+// stringOr returns value when it is non-empty, otherwise fallback.
+func stringOr(value, fallback string) string {
+	if value != "" {
+		return value
 	}
-	return defaultVal
+	return fallback
+}
+
+// boolOr parses a bool, falling back when empty or malformed.
+func boolOr(value string, fallback bool) bool {
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+// uintOr parses an unsigned integer, falling back when empty or malformed. A
+// parsed zero is honoured: zero means "disabled".
+func uintOr(value string, fallback uint) uint {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseUint(strings.TrimSpace(value), 10, 32)
+	if err != nil {
+		return fallback
+	}
+	return uint(parsed)
 }
