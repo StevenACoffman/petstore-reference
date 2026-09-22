@@ -42,6 +42,10 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
       with:
+        # Pinned deliberately. The action defaults to `~> v2`, which floats across
+        # minor versions, and 2.18 changed what ${artifact} expands to in
+        # docker_signs. Keep this in step with .mise.toml.
+        version: 2.18.2
         args: release --clean
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

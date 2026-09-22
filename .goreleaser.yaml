@@ -117,7 +117,15 @@ docker_signs:
 - id: image
   cmd: cosign
   artifacts: manifests
-  args: ["sign", "--yes", "${artifact}"]
+  # ${artifact}@${digest}, not ${artifact}: what ${artifact} expands to changed
+  # between goreleaser versions. 2.15.2 gave a digest reference; 2.18.2 gives the
+  # bare repository, which sends cosign looking for :latest and failing with
+  # MANIFEST_UNKNOWN. Appending ${digest} is what goreleaser documents, and it is
+  # also the safer reference: a tag can move between the push and the signature.
+  #
+  # The two forms are mutually exclusive, so the workflows pin the goreleaser
+  # version rather than letting the action's default `~> v2` float.
+  args: ["sign", "--yes", "${artifact}@${digest}"]
   output: true
 
 changelog:
