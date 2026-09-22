@@ -1,0 +1,128 @@
+# Continuous benchmarking: measure the functional core on every change, compare
+# a pull request against its base, and record the trend in InfluxDB.
+#
+# The base and the head are measured in the same job on the same runner. A
+# cached baseline from an earlier run would have been measured on different
+# hardware, and the difference between two GitHub runners is larger than most
+# regressions worth catching.
+#
+# The comparison is advisory and does not fail the build. Shared runners are too
+# noisy for a hard gate to be honest; benchstat reports a p-value so a reader can
+# tell a real change from noise. See the README for how to turn it into a gate.
+#
+# Publishing is opt-in. With no INFLUXDB_URL secret the publish step prints the
+# line protocol and succeeds, so a fork's pull request still gets its numbers.
+name: benchmark
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Ten samples is the smallest count that gives benchstat a usable distribution.
+  BENCH_COUNT: "10"
+  BENCH_PKG: ./internal/pet/
+
+jobs:
+  benchmark:
+    name: Benchmark the core
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write # comment the comparison on the pull request
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+        fetch-depth: 0 # the base commit has to be reachable to benchmark it
+
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: go.mod
+
+    - name: Install benchstat
+      run: go install golang.org/x/perf/cmd/benchstat@latest
+
+    - name: Benchmark this commit
+      run: |
+        set -euo pipefail
+        mkdir -p reports
+        go test -bench=. -benchmem -run='^$' -count="$BENCH_COUNT" "$BENCH_PKG" \
+          | tee reports/bench-new.txt
+
+    # Measuring the base on this same runner is the point: it removes the
+    # machine from the comparison, leaving only the code.
+    - name: Benchmark the base commit
+      if: github.event_name == 'pull_request'
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -euo pipefail
+        git checkout --detach "$BASE_SHA"
+        go test -bench=. -benchmem -run='^$' -count="$BENCH_COUNT" "$BENCH_PKG" \
+          | tee reports/bench-base.txt
+        git checkout -
+
+    - name: Compare
+      if: github.event_name == 'pull_request'
+      run: |
+        set -euo pipefail
+        benchstat reports/bench-base.txt reports/bench-new.txt | tee reports/comparison.txt
+        {
+          echo "## Benchmark comparison"
+          echo
+          echo '```'
+          cat reports/comparison.txt
+          echo '```'
+          echo
+          echo "A change with p > 0.05 is noise, not a regression."
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    # Only a same-repository pull request can comment: a fork's token is
+    # read-only, and the run should not fail over that.
+    - name: Comment the comparison
+      if: >-
+        github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        script: |
+          const fs = require('fs');
+          const body = '## Benchmark comparison\n\n```\n'
+            + fs.readFileSync('reports/comparison.txt', 'utf8')
+            + '\n```\n\nA change with p > 0.05 is noise, not a regression.';
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body,
+          });
+
+    # A no-op without the secret, so this step is safe on a fork.
+    - name: Record the trend
+      env:
+        INFLUXDB_URL: ${{ secrets.INFLUXDB_URL }}
+        INFLUXDB_TOKEN: ${{ secrets.INFLUXDB_TOKEN }}
+        INFLUXDB_ORG: ${{ secrets.INFLUXDB_ORG }}
+        INFLUXDB_BUCKET: ${{ secrets.INFLUXDB_BUCKET }}
+      run: |
+        set -euo pipefail
+        BENCH_GOOS="$(go env GOOS)" BENCH_GOARCH="$(go env GOARCH)" \
+          go run ./cmd/benchpublish reports/bench-new.txt
+
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      if: always()
+      with:
+        name: benchmark-reports
+        path: reports/
+        retention-days: 30

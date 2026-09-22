@@ -91,6 +91,32 @@ services:
     - tempo
     - prometheus
     - pyroscope
+  # Benchmark history, opt-in separately from the observability stack:
+  #   docker compose --profile benchmarks up -d
+  # `just bench-db` is the shorthand. The token below is a local development
+  # credential; CI writes to a real deployment through INFLUXDB_TOKEN.
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: pets-influxdb
+    profiles: ["benchmarks"]
+    restart: unless-stopped
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: petstore
+      DOCKER_INFLUXDB_INIT_PASSWORD: password
+      DOCKER_INFLUXDB_INIT_ORG: petstore
+      DOCKER_INFLUXDB_INIT_BUCKET: benchmarks
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: local-dev-token
+    ports:
+    - "8086:8086"
+    volumes:
+    - influxdb_data:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD-SHELL", "influx ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 volumes:
   postgres_data:
   tempo_data:
+  influxdb_data:

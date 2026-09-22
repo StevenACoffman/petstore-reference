@@ -140,6 +140,49 @@ fuzz-all duration="20s":
         go test -run='^$' -fuzz="^${target}$" -fuzztime={{duration}} ./internal/pet/
     done
 
+# count=10 gives benchstat a distribution to work with; a single run is not a
+# measurement.
+#
+# Benchmark the functional core
+bench count="10":
+    mkdir -p reports
+    go test -bench=. -benchmem -run='^$' -count={{count}} ./internal/pet/ \
+        | tee reports/bench-new.txt
+
+# Both halves run on this machine back to back, so the comparison is code
+# versus code rather than machine versus machine.
+#
+# Compare the working tree against a base ref
+bench-compare base="main" count="10":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v benchstat >/dev/null || go install golang.org/x/perf/cmd/benchstat@latest
+    mkdir -p reports
+    go test -bench=. -benchmem -run='^$' -count={{count}} ./internal/pet/ > reports/bench-new.txt
+    # A worktree rather than stash-and-checkout: the base is built in its own
+    # directory, so an interrupted run cannot strand the working tree on a
+    # detached HEAD with the changes stashed.
+    worktree="$(mktemp -d)"
+    trap 'git worktree remove --force "$worktree" >/dev/null 2>&1 || true; rm -rf "$worktree"' EXIT
+    git worktree add --detach --quiet "$worktree" {{base}}
+    (cd "$worktree" && go test -bench=. -benchmem -run='^$' -count={{count}} ./internal/pet/) \
+        > reports/bench-base.txt
+    benchstat reports/bench-base.txt reports/bench-new.txt
+
+# Start a local InfluxDB for benchmark history
+bench-db:
+    docker compose --profile benchmarks up -d influxdb
+    @echo "InfluxDB http://localhost:8086  (petstore / password, token local-dev-token)"
+
+# Record the last `just bench` run in the local InfluxDB
+bench-publish:
+    INFLUXDB_URL=${INFLUXDB_URL:-http://localhost:8086} \
+    INFLUXDB_TOKEN=${INFLUXDB_TOKEN:-local-dev-token} \
+    INFLUXDB_ORG=${INFLUXDB_ORG:-petstore} \
+    INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-benchmarks} \
+    BENCH_GOOS=$(go env GOOS) BENCH_GOARCH=$(go env GOARCH) \
+        go run ./cmd/benchpublish reports/bench-new.txt
+
 # Start PostgreSQL and Pyroscope via docker-compose
 up:
     docker compose up -d postgres pyroscope
@@ -152,9 +195,9 @@ observability:
     docker compose --profile observability up -d
     @echo "Grafana http://localhost:3000  Pyroscope http://localhost:4040  Tempo http://localhost:3200"
 
-# Stop every container, including the optional stack
+# Stop every container, including the optional stacks
 down:
-    docker compose --profile observability down
+    docker compose --profile observability --profile benchmarks down
 
 # Run database migrations up
 migrate-up:

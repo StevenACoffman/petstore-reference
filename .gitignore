@@ -85,5 +85,8 @@ gha-kubeconfig-*
 !.vale/styles
 .vale/styles/*
 !.vale/styles/config
+# Benchmark output from `just bench`
+reports/
+
 # Added by goreleaser init:
 dist/

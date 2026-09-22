@@ -200,6 +200,80 @@ just load-test               # or: just load-test 2m 20
 scenario. `k6_scenario="write"` shows only the create/update path. k6 does not
 send that header on its own, so the script sets it.
 
+### Continuous Benchmarking
+
+Benchmarks over the functional core (`internal/pet/core.go`) turn performance
+into something CI can see. The core is the right subject: it is deterministic
+and needs no database, so a change in ns/op is a change in the code rather than
+in the runner's mood.
+
+```bash
+just bench                 # measure, 10 samples
+just bench-compare main    # compare the working tree against a base ref
+```
+
+`bench-compare` measures both sides on this machine, back to back, in a
+throwaway git worktree. A baseline recorded on other hardware is not comparable,
+and the worktree means an interrupted run cannot strand your checkout.
+
+Read the comparison by its p-value, not its percentage. `benchstat` reports
+`p > 0.05` when a difference is indistinguishable from noise, which most
+differences on a shared runner are.
+
+#### Recording the trend
+
+A single comparison says whether one change was slow; a history says whether the
+service has been getting slower. `benchpublish` reduces each benchmark's samples
+to their median and writes one point per benchmark to InfluxDB:
+
+```bash
+just bench-db       # a local InfluxDB on :8086, opt-in compose profile
+just bench          # measure
+just bench-publish  # record
+```
+
+The median rather than the mean, because a shared runner stalls occasionally and
+one stall drags a mean far enough to look like a regression. One point per
+benchmark rather than per sample, because points sharing a measurement, tag set
+and timestamp overwrite each other.
+
+The endpoint is entirely configuration, so any self-hosted InfluxDB works:
+
+| Variable               | Default      | Meaning                            |
+| :--------------------- | :----------- | :--------------------------------- |
+| `INFLUXDB_URL`         | *(unset)*    | Where to write. Unset means no-op. |
+| `INFLUXDB_TOKEN`       | *(unset)*    | Required when the URL is set.      |
+| `INFLUXDB_ORG`         | `petstore`   | Organisation.                      |
+| `INFLUXDB_BUCKET`      | `benchmarks` | Bucket.                            |
+| `INFLUXDB_MEASUREMENT` | `benchmark`  | Measurement name.                  |
+
+Leaving `INFLUXDB_URL` unset prints the line protocol and exits zero, which is
+what lets a fork's pull request run benchmarks it has no credential to record. A
+URL without a token is an error rather than a no-op, because it means someone
+intended to publish.
+
+Points are tagged `name`, `benchmark`, `branch`, `commit`, `goos` and `goarch`.
+`name` keeps the `-10` GOMAXPROCS suffix and `benchmark` drops it, so a graph can
+follow one benchmark across runners that report different suffixes:
+
+```flux
+from(bucket: "benchmarks")
+  |> range(start: -30d)
+  |> filter(fn: (r) => r._measurement == "benchmark" and r._field == "ns_per_op")
+  |> filter(fn: (r) => r.benchmark == "ToProtoPet" and r.branch == "main")
+  |> aggregateWindow(every: 1d, fn: median, createEmpty: false)
+```
+
+Grafana is provisioned with the InfluxDB datasource, so running both the
+`observability` and `benchmarks` profiles gives you the chart without any setup.
+
+The `benchmark` workflow runs all of this on every pull request, comments the
+comparison, and records the trend when the `INFLUXDB_URL` secret exists. It does
+not fail the build, because a shared runner is too noisy for a hard gate to
+mean anything.
+To make it one, compare medians from InfluxDB against a threshold rather than
+gating on a single run.
+
 ### Optional Observability Stack
 
 Profiling, metrics and tracing all work without this. It exists for one thing:

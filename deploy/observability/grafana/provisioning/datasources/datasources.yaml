@@ -27,6 +27,19 @@ datasources:
   uid: pyroscope
   access: proxy
   url: http://pyroscope:4040
+# Benchmark history. Only reachable with the benchmarks compose profile running;
+# Grafana starts fine without it and reports the datasource as down when queried.
+- name: InfluxDB
+  type: influxdb
+  uid: influxdb
+  access: proxy
+  url: http://influxdb:8086
+  jsonData:
+    version: Flux
+    organization: petstore
+    defaultBucket: benchmarks
+  secureJsonData:
+    token: local-dev-token
 - name: Prometheus
   type: prometheus
   uid: prometheus
