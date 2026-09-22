@@ -9,26 +9,23 @@
 # so it is the part where a strong mutation score is both achievable and meaningful.
 # The shell's behaviour is proven by the container-backed suites, which a mutation
 # run does not execute — scoring it here would measure the wrong thing.
-
 # Never mutate generated or vendored code; a surviving mutant there says nothing
 # about our tests.
 exclude_dirs:
-  - gen
-  - web
-  - internal/db
-  - sql
-  - stubs
-
+- gen
+- web
+- internal/db
+- sql
+- stubs
 ignore_source_lines:
-  - "// Code generated"
-
+- "// Code generated"
 disable_mutators:
-  # Replaces a context argument with nil. On this codebase every such mutant
-  # survives (0/25 killed) because contexts are plumbing, not behaviour: no
-  # assertion distinguishes them, and adding assertions that do would be testing
-  # the compiler rather than the domain. summary_rules §4 warns against exactly
-  # that kind of test.
-  - expression/context-nil
+# Replaces a context argument with nil. On this codebase every such mutant
+# survives (0/25 killed) because contexts are plumbing, not behaviour: no
+# assertion distinguishes them, and adding assertions that do would be testing
+# the compiler rather than the domain. summary_rules §4 warns against exactly
+# that kind of test.
+- expression/context-nil
 
 # Thresholds are NOT set here, because the right number depends on what is being
 # mutated. The pure core sustains a high bar (see `just mutate`); the I/O shell
